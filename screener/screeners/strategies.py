@@ -376,6 +376,108 @@ class HighVolume(Screener):
         return markers
 
 
+class VolatileUptrend(Screener):
+    """Rank stocks by daily-return volatility, signalling BUY on volatile uptrends.
+
+    Idea: a stock that usually oscillates ~+/-10% a day offers more opportunity
+    than one stuck at +/-4%. If that same stock is *already* trending up across
+    the 3M / 6M / 12M windows, it is both energetic and in the right direction.
+
+    - ``daily_vol``    : std of daily % returns over ``vol_window`` days.
+    - ``avg_abs_move`` : mean absolute daily % move (intuitive "typical swing").
+    - ``ann_vol``      : annualised volatility (daily_vol * sqrt(252)).
+    - ``ret_3m/6m/12m/2y`` : trailing returns anchored on calendar offsets.
+
+    BUY requires every configured trend window to clear its threshold AND
+    ``daily_vol >= min_vol``. Results carry ``score`` (= daily_vol) so the
+    reporting layer can rank the passing names by volatility, high to low.
+    """
+
+    def __init__(
+        self,
+        vol_window: int = 126,
+        min_vol: float = 2.0,
+        min_ret_3m: float = 0.0,
+        min_ret_6m: float = 0.0,
+        min_ret_12m: float = 0.0,
+    ):
+        self.vol_window = vol_window
+        self.min_vol = min_vol
+        self.min_ret_3m = min_ret_3m
+        self.min_ret_6m = min_ret_6m
+        self.min_ret_12m = min_ret_12m
+        self._df: pd.DataFrame | None = None
+
+    def _return_since(self, df: pd.DataFrame, months: int) -> float | None:
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return None
+        last_date = df.index[-1]
+        last_close = float(df["Close"].iloc[-1])
+        target = last_date - pd.DateOffset(months=months)
+        prior = df.loc[:target, "Close"]
+        if prior.empty:
+            return None
+        base = float(prior.iloc[-1])
+        if base <= 0:
+            return None
+        return (last_close / base - 1.0) * 100.0
+
+    def filter(self, ticker: str, df: pd.DataFrame) -> dict[str, Any]:
+        self._df = df
+        if df.empty or "Close" not in df.columns or len(df) < 2:
+            return {"ticker": ticker, "signal": Signal.NEUTRAL, "reason": "no_data"}
+
+        daily = df["Close"].pct_change().dropna() * 100.0
+        recent = daily.iloc[-self.vol_window:]
+        if recent.empty:
+            return {"ticker": ticker, "signal": Signal.NEUTRAL, "reason": "no_data"}
+
+        daily_vol = float(recent.std())
+        avg_abs_move = float(recent.abs().mean())
+        ann_vol = daily_vol * (252 ** 0.5)
+
+        ret_3m = self._return_since(df, 3)
+        ret_6m = self._return_since(df, 6)
+        ret_12m = self._return_since(df, 12)
+        ret_2y = self._return_since(df, 24)
+
+        trend_ok = (
+            ret_3m is not None and ret_3m >= self.min_ret_3m
+            and ret_6m is not None and ret_6m >= self.min_ret_6m
+            and ret_12m is not None and ret_12m >= self.min_ret_12m
+        )
+        vol_ok = daily_vol >= self.min_vol
+        signal = Signal.BUY if (trend_ok and vol_ok) else Signal.NEUTRAL
+
+        def _fmt(v: float | None) -> str:
+            return f"{v:+.0f}%" if v is not None else "n/a"
+
+        reason = (
+            f"vol={daily_vol:.1f}% (~{avg_abs_move:.1f}% swing) | "
+            f"3M {_fmt(ret_3m)} 6M {_fmt(ret_6m)} 12M {_fmt(ret_12m)} 2Y {_fmt(ret_2y)}"
+        )
+
+        return {
+            "ticker": ticker,
+            "last_price": float(df["Close"].iloc[-1]),
+            "daily_vol": round(daily_vol, 2),
+            "avg_abs_move": round(avg_abs_move, 2),
+            "ann_vol": round(ann_vol, 1),
+            "ret_3m": round(ret_3m, 1) if ret_3m is not None else None,
+            "ret_6m": round(ret_6m, 1) if ret_6m is not None else None,
+            "ret_12m": round(ret_12m, 1) if ret_12m is not None else None,
+            "ret_2y": round(ret_2y, 1) if ret_2y is not None else None,
+            "score": round(daily_vol, 2),
+            "signal": signal,
+            "reason": reason,
+            "signal_date": str(df.index[-1].date()) if isinstance(df.index, pd.DatetimeIndex) else None,
+            "marker_dates": [],
+        }
+
+    def get_signal_markers(self) -> list[dict]:
+        return []
+
+
 CUSTOM_CDL_LABELS = {
     "2crows": "Two Crows",
     "3blackcrows": "Three Black Crows",

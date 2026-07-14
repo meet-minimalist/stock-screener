@@ -14,7 +14,7 @@ import streamlit as st
 from screener.data.universe import get_ticker_list
 from screener.reports.chart_markers import build_stock_chart
 from screener.screeners.engine import ScreeningEngine
-from screener.screeners.strategies import BigGain, BullishMACD, CandlePattern, GoldenCross, HighVolume, Near52WeekHigh, OversoldBounce
+from screener.screeners.strategies import BigGain, BullishMACD, CandlePattern, GoldenCross, HighVolume, Near52WeekHigh, OversoldBounce, VolatileUptrend
 from screener.screeners.strategies import ALL_PATTERNS, CUSTOM_CDL_LABELS, DEFAULT_CDL_PATTERNS
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s | %(message)s")
@@ -27,6 +27,7 @@ STRATEGY_MAP: dict[str, type] = {
     "Big Single-Day Gain (>=5%)": BigGain,
     "High Volume vs SMA (2x avg)": HighVolume,
     "Candlestick Patterns": CandlePattern,
+    "Volatile Uptrend (rank by volatility)": VolatileUptrend,
 }
 
 UNIVERSE_OPTIONS = {
@@ -139,6 +140,9 @@ if run_clicked:
     status_text.empty()
 
     filtered_results = [r for r in results if r.get("signal") in ("BUY", "SELL")]
+    # Rank by score (e.g. volatility) when the strategy provides one, high to low.
+    if any(isinstance(r.get("score"), (int, float)) for r in filtered_results):
+        filtered_results.sort(key=lambda r: r.get("score") or float("-inf"), reverse=True)
 
     st.session_state.scan_done = True
     st.session_state.results = results

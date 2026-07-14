@@ -13,7 +13,7 @@ from screener.config import ScreenConfig
 from screener.data.universe import get_ticker_list
 from screener.reports.formatter import export_csv, format_results_table
 from screener.screeners.engine import ScreeningEngine
-from screener.screeners.strategies import BigGain, BullishMACD, CandlePattern, GoldenCross, HighVolume, Near52WeekHigh, OversoldBounce
+from screener.screeners.strategies import BigGain, BullishMACD, CandlePattern, GoldenCross, HighVolume, Near52WeekHigh, OversoldBounce, VolatileUptrend
 from screener.screeners.strategies import DEFAULT_CDL_PATTERNS
 
 STRATEGY_MAP = {
@@ -24,6 +24,7 @@ STRATEGY_MAP = {
     "big_gain": BigGain,
     "high_volume": HighVolume,
     "candle_patterns": CandlePattern,
+    "volatile_uptrend": VolatileUptrend,
 }
 
 
@@ -87,6 +88,10 @@ def main():
         rsi_periods=config.indicators.rsi,
         macd_config=config.indicators.macd,
     )
+
+    # Rank by score (e.g. volatility) when the strategy provides one, high to low.
+    if any(isinstance(r.get("score"), (int, float)) for r in results):
+        results.sort(key=lambda r: r.get("score") or float("-inf"), reverse=True)
 
     print("\n" + format_results_table(results))
 
