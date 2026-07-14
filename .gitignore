@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local price-data cache (downloaded on demand) and user uploads
+data/yfinance_cache/
+data/uploads/
