@@ -39,43 +39,95 @@ def _return_pct(close: pd.Series, days: int) -> float | None:
     return (float(s.iloc[-1]) / base - 1.0) * 100.0
 
 
-def _rrg_quadrant(
+def classify_quadrant(rs_ratio: float | None, rs_momentum: float | None) -> str:
+    """Map an (RS-Ratio, RS-Momentum) pair to its RRG quadrant (100 = neutral)."""
+    if rs_ratio is None or rs_momentum is None:
+        return "n/a"
+    if rs_ratio >= 100 and rs_momentum >= 100:
+        return "Leading"
+    if rs_ratio >= 100 and rs_momentum < 100:
+        return "Weakening"
+    if rs_ratio < 100 and rs_momentum < 100:
+        return "Lagging"
+    return "Improving"
+
+
+def _rrg_frame(
     sector_close: pd.Series, bench_close: pd.Series, window: int = 63
-) -> dict:
-    """Approximate JdK RS-Ratio / RS-Momentum and classify the RRG quadrant.
+) -> pd.DataFrame:
+    """RS-Ratio / RS-Momentum time series for one sector vs the benchmark.
 
     RS       = sector / benchmark (relative strength line)
     RS-Ratio = 100 * RS / SMA(RS, window)          -> RS vs its own trend
     RS-Mom   = 100 * Ratio / SMA(Ratio, window)     -> rate of change of the ratio
 
-    >100 means "above trend". The (Ratio, Momentum) pair lands in one of four
-    quadrants that describe the sector's rotation phase. This is a transparent
-    approximation of the proprietary RRG normalisation, good enough to rank and
-    classify sectors consistently.
+    >100 means "above trend". The (Ratio, Momentum) pair at any date lands in one
+    of four quadrants describing the sector's rotation phase. This is a
+    transparent approximation of the proprietary RRG normalisation, good enough
+    to classify and rank sectors consistently. Returns an empty frame when there
+    is not enough overlapping history.
     """
     idx = sector_close.dropna().index.intersection(bench_close.dropna().index)
     if len(idx) < window + 2:
-        return {"rs_ratio": None, "rs_momentum": None, "quadrant": "n/a"}
+        return pd.DataFrame(columns=["rs_ratio", "rs_momentum"])
 
     rs = (sector_close.loc[idx] / bench_close.loc[idx]) * 100.0
     ratio = 100.0 * rs / rs.rolling(window).mean()
     momentum = 100.0 * ratio / ratio.rolling(window).mean()
+    return pd.DataFrame({"rs_ratio": ratio, "rs_momentum": momentum}).dropna()
 
-    r = ratio.dropna()
-    m = momentum.dropna()
-    if r.empty or m.empty:
+
+def _rrg_quadrant(
+    sector_close: pd.Series, bench_close: pd.Series, window: int = 63
+) -> dict:
+    """Latest RS-Ratio, RS-Momentum, and quadrant for one sector vs the market."""
+    frame = _rrg_frame(sector_close, bench_close, window)
+    if frame.empty:
         return {"rs_ratio": None, "rs_momentum": None, "quadrant": "n/a"}
+    rv = float(frame["rs_ratio"].iloc[-1])
+    mv = float(frame["rs_momentum"].iloc[-1])
+    return {"rs_ratio": round(rv, 2), "rs_momentum": round(mv, 2),
+            "quadrant": classify_quadrant(rv, mv)}
 
-    rv, mv = float(r.iloc[-1]), float(m.iloc[-1])
-    if rv >= 100 and mv >= 100:
-        quad = "Leading"
-    elif rv >= 100 and mv < 100:
-        quad = "Weakening"
-    elif rv < 100 and mv < 100:
-        quad = "Lagging"
-    else:
-        quad = "Improving"
-    return {"rs_ratio": round(rv, 2), "rs_momentum": round(mv, 2), "quadrant": quad}
+
+def compute_rrg_tails(
+    start_date: str,
+    end_date: str,
+    interval: str = "1d",
+    rrg_window: int = 63,
+    tail_weeks: int = 12,
+    cache_dir: str = "data/yfinance_cache",
+) -> dict[str, pd.DataFrame]:
+    """RS-Ratio/Momentum trajectory ("tail") for every sector, for an RRG plot.
+
+    Each sector's series is sampled weekly (to cut daily noise) and trimmed to
+    the last ``tail_weeks`` points. The final row is "now"; earlier rows show
+    where the sector was over the preceding weeks (~12 weeks = 3 months,
+    ~26 = 6 months). Returns ``{sector: DataFrame[rs_ratio, rs_momentum, ...]}``.
+    """
+    fetcher = DataFetcher(cache_dir=cache_dir)
+    bench = fetcher.get_data(MARKET_BENCHMARK, start_date, end_date, interval=interval)
+    if bench.empty:
+        raise RuntimeError(f"No data for market benchmark {MARKET_BENCHMARK}")
+    bench_close = bench["Close"]
+
+    tails: dict[str, pd.DataFrame] = {}
+    for sector, etf in SECTOR_ETF.items():
+        df = fetcher.get_data(etf, start_date, end_date, interval=interval)
+        if df.empty:
+            continue
+        frame = _rrg_frame(df["Close"], bench_close, window=rrg_window)
+        if frame.empty:
+            continue
+        if isinstance(frame.index, pd.DatetimeIndex):
+            frame = frame.resample("W-FRI").last().dropna()
+        tail = frame.tail(tail_weeks).copy()
+        if tail.empty:
+            continue
+        tail["sector"] = sector
+        tail["etf"] = etf
+        tails[sector] = tail
+    return tails
 
 
 def compute_sector_rotation(
