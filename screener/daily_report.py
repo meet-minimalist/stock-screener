@@ -129,6 +129,8 @@ def main():
     parser.add_argument("--top", type=int, default=15, help="How many picks to show")
     parser.add_argument("--output", "-o", type=str, default=None,
                         help="Write the report text to this file")
+    parser.add_argument("--html", type=str, default=None,
+                        help="Write a standalone HTML dashboard to this path (GitHub Pages)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -143,10 +145,13 @@ def main():
     )
 
     config = ScreenConfig.from_yaml(args.config)
+    start = args.start or config.start_date
+    end = args.end or config.end_date
+    interval = args.interval or config.interval
     result = run_daily(
-        start_date=args.start or config.start_date,
-        end_date=args.end or config.end_date,
-        interval=args.interval or config.interval,
+        start_date=start,
+        end_date=end,
+        interval=interval,
         universe=args.universe or config.universe,
         top_n=args.top,
         cache_dir=config.cache_dir,
@@ -158,6 +163,14 @@ def main():
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_text(report, encoding="utf-8")
         print(f"\nSaved report to {args.output}")
+
+    if args.html:
+        from screener.report_html import build_dashboard_body, render_rrg_data_uri, wrap_page
+        uri = render_rrg_data_uri(start, end, interval, cache_dir=config.cache_dir)
+        page = wrap_page(build_dashboard_body(result, uri))
+        Path(args.html).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.html).write_text(page, encoding="utf-8")
+        print(f"Saved HTML dashboard to {args.html}")
 
 
 if __name__ == "__main__":
