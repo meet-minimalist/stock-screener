@@ -1,28 +1,33 @@
 # stock-screener
 
-A technical stock screener for US equities (S&P 500) with a command-line
-interface, a Streamlit web UI, and a sector-rotation view. It screens a ticker
-universe against a library of technical strategies, ranks candidates, and shows
-annotated price charts — plus a Relative Rotation Graph (RRG) for spotting which
-sectors are leading, lagging, or turning.
+A stock screener and daily selection tool for US equities (S&P 500). It blends
+technicals, sector rotation, and fundamentals into a single **Daily Conviction
+Score**, publishes a hands-off **interactive dashboard** to GitHub Pages every
+trading day, and also offers a CLI and a Streamlit app for interactive work.
 
-Price data is pulled from Yahoo Finance and cached on disk, so repeated scans are
-fast after the first run.
+Price data is pulled from Yahoo Finance and cached on disk; fundamentals come from
+finviz and are snapshotted over time. Repeated scans are fast after the first run.
 
 ## Features
 
+- **Daily Conviction Score** — one 0–100 ranking per stock, blending a sector
+  RRG tailwind, trend strength, relative strength vs its own sector, tradeable
+  volatility, a fresh daily trigger, and fundamentals, behind liquidity and
+  fundamental gates. See [`scoring.py`](screener/scoring.py).
+- **Fundamental analysis** — value (P/E, PEG), quality (ROE, margins), and growth
+  (EPS/sales) pulled in bulk from finviz; used as a gate, a scored factor, and
+  displayed columns. Snapshots accumulate under `data/fundamentals/`.
+- **Interactive multi-tab screener** — a ChartMill-style hosted page: every
+  screen (Top Picks, Volatile Uptrends, 52-week-high breakouts, Sector Leaders,
+  Value + Momentum, Quality Compounders, candlestick patterns, …) is a sortable,
+  filterable, searchable table with CSV export and rating badges.
 - **Technical screeners** — RSI oversold bounce, bullish MACD, golden cross,
   near 52-week high, big single-day gain, high volume, candlestick patterns.
-- **Volatile Uptrend ranking** — ranks stocks by daily-return volatility and
-  flags names that are *already trending up* (positive 3M/6M/12M returns) while
-  still being volatile enough to trade.
 - **Sector rotation (RRG)** — classifies every GICS sector (via its SPDR ETF)
   vs SPY into Leading / Weakening / Lagging / Improving, with a scatter plot and
-  historical tails.
-- **Sector peer comparison** — ranks the stocks in one sector against each other
-  and against the sector ETF and the market.
-- **Two front-ends** — a CLI for scripted runs and a Streamlit app for
-  interactive exploration with charts.
+  historical tails; plus a sector peer comparison.
+- **Automated & hands-off** — a GitHub Action rebuilds and deploys the dashboard
+  after each US close; a weekly Action refreshes the fundamentals snapshot.
 
 ## Installation
 
@@ -81,6 +86,20 @@ python -m screener.sector_cli peers --sector tech --max-names 25
 `--sector` accepts a GICS name (`"Health Care"`), an alias (`tech`, `finance`),
 or the ETF ticker (`XLF`).
 
+### Daily conviction report & interactive site
+
+```bash
+# Console table of the top-ranked names (needs ~18 months of history)
+python -m screener.daily_report --start 2024-06-22 --end 2026-06-22 --top 20
+
+# Also emit the interactive multi-tab screener page (open it in a browser)
+python -m screener.daily_report --start 2024-06-22 --end 2026-06-22 --html site/index.html
+```
+
+The pipeline computes sector context, scores every S&P 500 constituent, tags each
+with the screens it belongs to, and (with `--html`) writes a self-contained page
+with a tab per screen, the sector RRG, and sortable/filterable/searchable tables.
+
 ### Streamlit app
 
 ```bash
@@ -92,6 +111,31 @@ Opens at http://localhost:8501 with two tabs:
 - **📊 Screener** — pick a universe, strategy, date range, and interval; run a
   scan; browse the ranked results and an annotated Plotly chart per ticker.
 - **🔄 Sector Rotation** — a Relative Rotation Graph of all sectors vs SPY.
+
+## Fundamentals
+
+Fundamentals are pulled in bulk from finviz and normalised into a common schema
+([`screener/fundamentals/`](screener/fundamentals/)):
+
+```bash
+python -m screener.fundamentals --market us      # refresh the US snapshot
+```
+
+Each refresh writes a dated snapshot **and** a `latest.csv` under
+`data/fundamentals/us/`. finviz keeps no history, so these snapshots become our
+own accumulating dataset. The daily run only reads the committed `latest.csv` — it
+never scrapes — so a missing snapshot simply leaves the fundamental factor neutral.
+
+## Automated daily publishing (GitHub Actions → Pages)
+
+Two workflows keep everything hands-off:
+
+- **`daily-picks.yml`** — after the US close on weekdays, builds the interactive
+  site and deploys it to GitHub Pages (project site:
+  `https://<user>.github.io/stock-screener/`). Enable it once via **Settings →
+  Pages → Build and deployment → Source: GitHub Actions**.
+- **`fundamentals-refresh.yml`** — weekly, refreshes the finviz snapshot and
+  commits it back to the repo.
 
 ## Understanding the Relative Rotation Graph
 
@@ -119,29 +163,42 @@ proprietary JdK RRG method — good enough to classify and rank consistently.
 
 ```
 screener/
-  cli.py                 # CLI entry point for the technical screeners
-  sector_cli.py          # CLI entry point for rotation / peers
+  cli.py                 # CLI for the technical screeners
+  sector_cli.py          # CLI for rotation / peers
+  daily_report.py        # daily pipeline: score universe -> report / site
   app.py                 # Streamlit UI
   config.py              # YAML config loader
+  paths.py               # single source of truth for data/ locations
+  scoring.py             # ConvictionScorer: the composite score + gates
+  records.py             # StockRecord domain model
+  screens.py             # registry of browsable screens (one entry per tab)
+  signals.py             # runs the strategies, returns per-stock signals + notes
   data/
     fetcher.py           # cached yfinance downloader
     universe.py          # S&P 500 / custom ticker lists
     sectors.py           # GICS sector -> SPDR ETF map + constituents
+  fundamentals/          # finviz source, snapshot store, service
   indicators/
     calculator.py        # SMA / RSI / MACD
   screeners/
     base.py, engine.py   # Screener contract + scanning engine
     strategies.py        # the technical strategies
     sector_rotation.py   # RRG math, sector rotation & peer comparison
-  reports/
-    formatter.py         # results table + CSV export
-    chart_markers.py     # annotated price charts
-    rrg_chart.py         # Relative Rotation Graph
+  reports/               # console table + Plotly charts (RRG, markers)
+  web/                   # the interactive site: charts, assets (CSS/JS), site
+tests/                   # pytest unit tests (scoring, screens, fundamentals)
 ```
+
+Everything the app downloads lives under `data/` (see `screener/paths.py`):
+`yfinance_cache/` (prices) and `uploads/` are gitignored; `tickers/` and
+`fundamentals/` are committed.
 
 ## Notes
 
-- The local price cache (`data/yfinance_cache/`) and uploads (`data/uploads/`)
-  are gitignored; they are rebuilt on demand.
+- Run the tests with `pytest`.
+- The local price cache (`data/yfinance_cache/`) and uploads are gitignored and
+  rebuilt on demand.
 - The Yahoo downloader is occasionally flaky on the first request for a ticker —
   if a scan reports "no data" for something you expect, just run it again.
+- The US universe is the S&P 500 (large-cap) for now; broader coverage and an
+  India (Nifty) view are planned.
