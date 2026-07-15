@@ -30,7 +30,7 @@ COLUMNS = [
 
 _RECORD_FIELDS = ["ticker", "sector", "score", "price", "daily_vol", "ret_3m",
                   "ret_6m", "ret_12m", "rel_sector_3m", "pe", "roe", "eps_growth",
-                  "debt_equity", "factors", "reason"]
+                  "debt_equity", "factors", "reason", "signal_notes"]
 
 
 def _payload(result: dict) -> tuple[list[dict], list[dict]]:

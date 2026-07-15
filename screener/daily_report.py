@@ -75,7 +75,7 @@ def run_daily(
         if res.score is None:  # gated (liquidity or fundamental)
             filtered += 1
             continue
-        res.signals = compute_signals(ticker, df)  # per-strategy screen membership
+        res.signals, res.signal_notes = compute_signals(ticker, df)  # screen membership + why
         scored.append(res)
 
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)

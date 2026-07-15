@@ -32,19 +32,27 @@ def _build_strategies() -> dict:
     }
 
 
-def compute_signals(ticker: str, df: pd.DataFrame) -> dict[str, str]:
-    """Run every strategy over ``df`` and return ``{screen_id: signal}``.
+def compute_signals(ticker: str, df: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+    """Run every strategy over ``df`` and return ``(signals, notes)``.
+
+    ``signals`` is ``{screen_id: BUY/SELL/NEUTRAL}``; ``notes`` is
+    ``{screen_id: reason}`` for the strategies that fired BUY (e.g. the specific
+    candlestick pattern, or "SMA20 > SMA50") so each screen tab can explain itself.
 
     Requires the indicators the strategies read (RSI_14, SMA_20/50, MACD) to be
     present on ``df``. Each strategy is isolated: if one raises (e.g. candlestick
     recognition without TA-Lib), it degrades to NEUTRAL instead of failing the row.
     """
     signals: dict[str, str] = {}
+    notes: dict[str, str] = {}
     for name, strategy in _build_strategies().items():
         try:
             result = strategy.filter(ticker, df)
-            signals[name] = result.get("signal", "NEUTRAL")
+            signal = result.get("signal", "NEUTRAL")
+            signals[name] = signal
+            if signal == "BUY" and result.get("reason"):
+                notes[name] = result["reason"]
         except Exception as exc:  # keep one bad strategy from sinking the row
             logger.debug("Strategy %s failed for %s: %s", name, ticker, exc)
             signals[name] = "NEUTRAL"
-    return signals
+    return signals, notes

@@ -151,7 +151,10 @@ SCRIPT = r"""
     if (!rows.length) body = '<tr><td class="empty" colspan="'+COLUMNS.length+'">No stocks match this screen and filters.</td></tr>';
     for (var r=0;r<rows.length;r++){ var rec=rows[r]; body += "<tr>";
       for (var j=0;j<COLUMNS.length;j++){ var col=COLUMNS[j];
-        var val = col.key==="rank" ? (r+1) : rec[col.key];
+        var val;
+        if (col.key==="rank") val = r+1;
+        else if (col.key==="reason") val = (rec.signal_notes && rec.signal_notes[state.tab]) || rec.reason;
+        else val = rec[col.key];
         var cls = col.align==="left" ? "left" : "num"; if (col.key==="ticker") cls+=" tk"; if (col.key==="rank") cls+=" rank"; if (col.key==="reason") cls="why";
         body += '<td class="'+cls+'">'+fmt(col, val)+"</td>"; }
       body += "</tr>"; }

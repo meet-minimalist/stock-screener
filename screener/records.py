@@ -36,7 +36,8 @@ class StockRecord:
     # Ratings + provenance.
     factors: dict[str, float] = field(default_factory=dict)
     triggers: list[str] = field(default_factory=list)
-    signals: dict[str, str] = field(default_factory=dict)  # per-strategy BUY/SELL/NEUTRAL
+    signals: dict[str, str] = field(default_factory=dict)       # per-strategy BUY/SELL/NEUTRAL
+    signal_notes: dict[str, str] = field(default_factory=dict)  # per-strategy "why it fired"
     reason: str = ""
 
     @property
