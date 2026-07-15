@@ -9,5 +9,6 @@ pytz
 streamlit>=1.28
 plotly>=5.15
 kaleido>=0.2
+finvizfinance>=0.14
 TA-Lib>=0.6
 yf-cache @ git+https://github.com/meet-minimalist/yf_cache.git
