@@ -184,12 +184,12 @@ def main():
         print(f"\nSaved report to {args.output}")
 
     if args.html:
-        from screener.report_html import build_dashboard_body, render_rrg_data_uri, wrap_page
+        from screener.web import build_site, render_rrg_data_uri
         uri = render_rrg_data_uri(start, end, interval, cache_dir=config.cache_dir)
-        page = wrap_page(build_dashboard_body(result, uri))
+        page = build_site(result, uri)
         Path(args.html).parent.mkdir(parents=True, exist_ok=True)
         Path(args.html).write_text(page, encoding="utf-8")
-        print(f"Saved HTML dashboard to {args.html}")
+        print(f"Saved HTML site to {args.html}")
 
 
 if __name__ == "__main__":
