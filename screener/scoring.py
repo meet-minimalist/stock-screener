@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import pandas as pd
 
+from screener.records import StockRecord
 from screener.screeners.sector_rotation import _return_pct
 from screener.screeners.strategies import _find_cross_above
 
@@ -187,24 +187,25 @@ class ConvictionScorer:
         self.vol_window = vol_window
 
     def score(self, ticker: str, sector: str | None, df: pd.DataFrame,
-              sector_ctx: dict[str, dict], fund=None) -> dict[str, Any] | None:
+              sector_ctx: dict[str, dict], fund=None) -> StockRecord | None:
         """Score one stock. Returns None if there isn't enough data to judge.
 
-        ``fund`` is an optional Fundamentals record; when absent the fundamental
-        factor stays neutral and the fundamental gate is skipped.
+        A gated stock is returned as a StockRecord with ``score is None`` and a
+        ``filter_reason``. ``fund`` is an optional Fundamentals record; when absent
+        the fundamental factor stays neutral and the fundamental gate is skipped.
         """
         if df.empty or "Close" not in df.columns or len(df) < 60:
             return None
 
         liq_ok, gate_reason = _liquidity_ok(df, self.gates)
         if not liq_ok:
-            return {"ticker": ticker, "sector": sector, "liquidity_ok": False,
-                    "score": None, "reason": f"filtered: {gate_reason}"}
+            return StockRecord(ticker=ticker, sector=sector, filtered=True,
+                               filter_reason=gate_reason, reason=f"filtered: {gate_reason}")
 
         fund_ok, fund_reason = _fundamental_gate(fund, self.gates)
         if not fund_ok:
-            return {"ticker": ticker, "sector": sector, "liquidity_ok": True,
-                    "gated": True, "score": None, "reason": f"filtered: {fund_reason}"}
+            return StockRecord(ticker=ticker, sector=sector, filtered=True,
+                               filter_reason=fund_reason, reason=f"filtered: {fund_reason}")
 
         close = df["Close"]
         price = float(close.iloc[-1])
@@ -235,29 +236,27 @@ class ConvictionScorer:
         }
         composite = sum(self.weights[k] * factors[k] for k in self.weights) * 100.0
 
-        return {
-            "ticker": ticker,
-            "sector": sector,
-            "liquidity_ok": True,
-            "score": round(composite, 1),
-            "price": round(price, 2),
-            "quadrant": quadrant,
-            "daily_vol": round(vol, 2),
-            "ret_3m": round(r3, 1) if r3 is not None else None,
-            "ret_6m": round(r6, 1) if r6 is not None else None,
-            "ret_12m": round(r12, 1) if r12 is not None else None,
-            "rel_sector_3m": round(r3 - sector_r3, 1) if (r3 is not None and sector_r3 is not None) else None,
-            # Fundamental display fields (None when unavailable).
-            "pe": _round(getattr(fund, "pe", None), 1),
-            "peg": _round(getattr(fund, "peg", None), 2),
-            "roe": _round(getattr(fund, "roe", None), 1),
-            "eps_growth": _round(getattr(fund, "eps_growth", None), 1),
-            "debt_equity": _round(getattr(fund, "debt_equity", None), 2),
-            "market_cap": getattr(fund, "market_cap", None),
-            "factors": {k: round(v, 2) for k, v in factors.items()},
-            "triggers": fired,
-            "reason": self._reason(quadrant, r12, r3, sector_r3, fired, fund),
-        }
+        return StockRecord(
+            ticker=ticker,
+            sector=sector,
+            score=round(composite, 1),
+            price=round(price, 2),
+            quadrant=quadrant,
+            daily_vol=round(vol, 2),
+            ret_3m=round(r3, 1) if r3 is not None else None,
+            ret_6m=round(r6, 1) if r6 is not None else None,
+            ret_12m=round(r12, 1) if r12 is not None else None,
+            rel_sector_3m=round(r3 - sector_r3, 1) if (r3 is not None and sector_r3 is not None) else None,
+            pe=_round(getattr(fund, "pe", None), 1),
+            peg=_round(getattr(fund, "peg", None), 2),
+            roe=_round(getattr(fund, "roe", None), 1),
+            eps_growth=_round(getattr(fund, "eps_growth", None), 1),
+            debt_equity=_round(getattr(fund, "debt_equity", None), 2),
+            market_cap=getattr(fund, "market_cap", None),
+            factors={k: round(v, 2) for k, v in factors.items()},
+            triggers=fired,
+            reason=self._reason(quadrant, r12, r3, sector_r3, fired, fund),
+        )
 
     @staticmethod
     def _reason(quadrant, r12, r3, sector_r3, fired, fund=None) -> str:

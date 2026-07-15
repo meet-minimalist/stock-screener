@@ -20,6 +20,7 @@ from screener.fundamentals import get_fundamentals
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
 from screener.screeners.sector_rotation import compute_sector_rotation
+from screener.signals import compute_signals
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +66,19 @@ def run_daily(
         df = fetcher.get_data(ticker, start_date, end_date, interval=interval)
         if df.empty:
             continue
-        df = calc.compute(df, sma_periods=[50, 200], macd_config=_MACD)
+        df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
+                          macd_config=_MACD)
         res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx,
                            fund=funds.get(ticker))
         if res is None:
             continue
-        if res.get("score") is None:  # gated (liquidity or fundamental)
+        if res.score is None:  # gated (liquidity or fundamental)
             filtered += 1
             continue
+        res.signals = compute_signals(ticker, df)  # per-strategy screen membership
         scored.append(res)
 
-    ranked = sorted(scored, key=lambda r: r["score"], reverse=True)
+    ranked = sorted(scored, key=lambda r: r.score, reverse=True)
     leaders = [r["sector"] for _, r in rotation.iterrows()
                if r["quadrant"] in ("Leading", "Improving")]
 
@@ -87,6 +90,7 @@ def run_daily(
         "filtered_out": filtered,
         "leading_sectors": leaders[:5],
         "rotation": rotation,
+        "records": ranked,       # all passing StockRecords (for the screen tabs)
         "ranked": ranked,
         "top": ranked[:top_n],
     }
@@ -113,10 +117,10 @@ def format_report(result: dict) -> str:
     table.align["Why"] = "l"
     for i, r in enumerate(result["top"], 1):
         table.add_row([
-            i, r["ticker"], r["score"], r["price"],
-            (r["sector"] or "?")[:16], r["daily_vol"],
-            _fmt(r["ret_3m"]), _fmt(r["ret_12m"]),
-            _plain(r.get("pe")), _pct(r.get("roe")), r["reason"][:52],
+            i, r.ticker, r.score, r.price,
+            (r.sector or "?")[:16], r.daily_vol,
+            _fmt(r.ret_3m), _fmt(r.ret_12m),
+            _plain(r.pe), _pct(r.roe), r.reason[:52],
         ])
     lines.append(table.get_string())
     return "\n".join(lines)

@@ -84,7 +84,8 @@ def build_dashboard_body(result: dict[str, Any], rrg_data_uri: str | None) -> st
     Usable directly as a Claude Artifact and wrappable into a full page for
     GitHub Pages via wrap_page().
     """
-    top = result["top"]
+    # Accept StockRecord objects or plain dicts.
+    top = [r.to_dict() if hasattr(r, "to_dict") else r for r in result["top"]]
     top_score = top[0]["score"] if top else 0
     chips = "".join(
         f'<span class="chip">{html.escape(s)}</span>' for s in result["leading_sectors"]

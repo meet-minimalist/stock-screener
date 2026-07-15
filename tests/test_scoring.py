@@ -62,17 +62,17 @@ def test_scorer_includes_fundamentals_and_gates():
     good = _fund(pe=25, peg=1.0, roe=30, net_margin=20, eps_growth=25,
                  sales_growth=15, debt_equity=0.5)
     res = scorer.score("AAA", "Information Technology", df, ctx, fund=good)
-    assert res is not None and res["score"] is not None
-    assert "fundamental" in res["factors"]
-    assert res["pe"] == 25 and res["roe"] == 30
+    assert res is not None and res.score is not None and res.passed
+    assert "fundamental" in res.factors
+    assert res.pe == 25 and res.roe == 30
 
     # A gated name (over-levered) is dropped: score None.
     gated = scorer.score("BBB", "Information Technology", df, ctx,
                          fund=_fund(pe=20, debt_equity=5.0))
-    assert gated is not None and gated["score"] is None and gated.get("gated")
+    assert gated is not None and gated.score is None and gated.filtered
 
     # Same stock scores higher with strong fundamentals than with weak ones.
     weak = _fund(pe=70, peg=3.0, roe=1, net_margin=1, eps_growth=-10, sales_growth=0)
-    hi = scorer.score("AAA", "Information Technology", df, ctx, fund=good)["score"]
-    lo = scorer.score("AAA", "Information Technology", df, ctx, fund=weak)["score"]
+    hi = scorer.score("AAA", "Information Technology", df, ctx, fund=good).score
+    lo = scorer.score("AAA", "Information Technology", df, ctx, fund=weak).score
     assert hi > lo
