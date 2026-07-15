@@ -1,0 +1,76 @@
+name: Daily Screener
+
+# Runs after the US close on weekdays, builds the interactive screener site, and
+# publishes it to GitHub Pages (project site: <user>.github.io/stock-screener/).
+on:
+  schedule:
+    - cron: "0 21 * * 1-5"   # 21:00 UTC ~= 1h after the US market close
+  workflow_dispatch:          # allow manual runs from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Reuse the downloaded price cache between runs so daily runs stay fast.
+      - name: Restore price-data cache
+        uses: actions/cache@v4
+        with:
+          path: data/yfinance_cache
+          key: yfcache-${{ github.run_id }}
+          restore-keys: yfcache-
+
+      # Lean deps: the daily job needs pandas-ta (not native TA-Lib) and reads the
+      # committed fundamentals snapshot (so no finvizfinance here). Pin kaleido to
+      # the self-contained 0.2.1 for headless PNG export of the RRG chart.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install "pandas>=2.0" "numpy<2.1" "pandas-ta>=0.4" "yfinance>=0.2" \
+            "plotly>=5.15" "kaleido==0.2.1" prettytable tqdm pyyaml lxml requests \
+            "yf-cache @ git+https://github.com/meet-minimalist/yf_cache.git"
+
+      - name: Compute date window
+        id: dates
+        run: |
+          echo "end=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "start=$(date -u -d '550 days ago' +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Build screener site
+        run: |
+          python -m screener.daily_report \
+            --universe sp500 \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
+            --top 30 \
+            --html ./_site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

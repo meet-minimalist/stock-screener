@@ -1,0 +1,43 @@
+name: Refresh Fundamentals
+
+# Weekly finviz pull. Fundamentals change quarterly, so once a week is plenty and
+# gentle on the source. The dated snapshot is committed back to the repo — finviz
+# keeps no history, so these snapshots become our own historical dataset, and the
+# daily job reads the committed latest.csv.
+on:
+  schedule:
+    - cron: "0 12 * * 6"    # Saturdays at 12:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pandas>=2.0" "finvizfinance>=0.14" lxml requests
+
+      - name: Refresh US fundamentals snapshot
+        run: python -m screener.fundamentals --market us --verbose
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/fundamentals/
+          if git diff --cached --quiet; then
+            echo "No fundamentals changes to commit."
+          else
+            git commit -m "chore(data): weekly US fundamentals snapshot"
+            git push
+          fi
