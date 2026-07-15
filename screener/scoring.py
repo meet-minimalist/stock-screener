@@ -19,11 +19,12 @@ QUADRANT_TAILWIND = {
 
 # Composite weights (must sum to 1.0). Tunable — this is the knob for style.
 DEFAULT_WEIGHTS = {
-    "sector": 0.25,       # sector tailwind (RRG)
-    "trend": 0.25,        # 3M/6M/12M trend + above moving averages
+    "sector": 0.20,       # sector tailwind (RRG)
+    "trend": 0.20,        # 3M/6M/12M trend + above moving averages
     "rel_strength": 0.15, # beating its own sector
-    "volatility": 0.15,   # lively enough to trade
-    "trigger": 0.20,      # a fresh catalyst today
+    "volatility": 0.10,   # lively enough to trade
+    "trigger": 0.15,      # a fresh catalyst today
+    "fundamental": 0.20,  # value + quality + growth
 }
 
 
@@ -32,6 +33,10 @@ class Gates:
     """Hard liquidity/quality filters — fail any and the stock is excluded."""
     min_price: float = 5.0
     min_dollar_vol: float = 5_000_000.0  # 20-day avg of close*volume
+    # Fundamental gate (applied only when the metric is present).
+    max_pe: float = 80.0            # drop richly-priced names
+    drop_negative_pe: bool = True   # drop money-losers (P/E < 0)
+    max_debt_equity: float = 3.0    # drop over-levered balance sheets
 
 
 def _volatility_fit(vol: float) -> float:
@@ -123,6 +128,55 @@ def _liquidity_ok(df: pd.DataFrame, gates: Gates) -> tuple[bool, str]:
     return True, ""
 
 
+def _fundamental_gate(fund, gates: Gates) -> tuple[bool, str]:
+    """Reject obviously weak fundamentals. Missing metrics never fail the gate."""
+    if fund is None:
+        return True, ""
+    if fund.pe is not None:
+        if gates.drop_negative_pe and fund.pe < 0:
+            return False, "negative earnings"
+        if fund.pe > gates.max_pe:
+            return False, f"P/E {fund.pe:.0f} > {gates.max_pe:.0f}"
+    if fund.debt_equity is not None and fund.debt_equity > gates.max_debt_equity:
+        return False, f"D/E {fund.debt_equity:.1f} > {gates.max_debt_equity:.1f}"
+    return True, ""
+
+
+def _ramp(value: float | None, low: float, high: float) -> float | None:
+    """Linear 0..1 as value goes low->high (clamped). None passes through."""
+    if value is None:
+        return None
+    if high == low:
+        return 1.0 if value >= high else 0.0
+    return max(0.0, min(1.0, (value - low) / (high - low)))
+
+
+def _fundamental_score(fund) -> float:
+    """Blend value + quality + growth into 0..1; missing dimensions stay neutral."""
+    if fund is None:
+        return 0.5
+
+    # Value: cheaper is better. Prefer PEG, fall back to P/E.
+    if fund.peg is not None:
+        value = 1.0 - (_ramp(fund.peg, 1.0, 3.0) or 0.0)   # PEG 1 -> 1.0, 3 -> 0
+    elif fund.pe is not None and fund.pe > 0:
+        value = 1.0 - (_ramp(fund.pe, 15.0, 50.0) or 0.0)  # P/E 15 -> 1.0, 50 -> 0
+    else:
+        value = None
+
+    # Quality: return on equity + net margin.
+    quality = _mean_present(_ramp(fund.roe, 0.0, 25.0), _ramp(fund.net_margin, 0.0, 20.0))
+    # Growth: forward EPS growth + trailing sales growth.
+    growth = _mean_present(_ramp(fund.eps_growth, 0.0, 25.0), _ramp(fund.sales_growth, 0.0, 20.0))
+
+    return _mean_present(value, quality, growth, default=0.5)
+
+
+def _mean_present(*values, default: float = 0.5) -> float:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else default
+
+
 class ConvictionScorer:
     """Blend the screeners into one 0-100 Daily Conviction Score per stock."""
 
@@ -133,8 +187,12 @@ class ConvictionScorer:
         self.vol_window = vol_window
 
     def score(self, ticker: str, sector: str | None, df: pd.DataFrame,
-              sector_ctx: dict[str, dict]) -> dict[str, Any] | None:
-        """Score one stock. Returns None if there isn't enough data to judge."""
+              sector_ctx: dict[str, dict], fund=None) -> dict[str, Any] | None:
+        """Score one stock. Returns None if there isn't enough data to judge.
+
+        ``fund`` is an optional Fundamentals record; when absent the fundamental
+        factor stays neutral and the fundamental gate is skipped.
+        """
         if df.empty or "Close" not in df.columns or len(df) < 60:
             return None
 
@@ -142,6 +200,11 @@ class ConvictionScorer:
         if not liq_ok:
             return {"ticker": ticker, "sector": sector, "liquidity_ok": False,
                     "score": None, "reason": f"filtered: {gate_reason}"}
+
+        fund_ok, fund_reason = _fundamental_gate(fund, self.gates)
+        if not fund_ok:
+            return {"ticker": ticker, "sector": sector, "liquidity_ok": True,
+                    "gated": True, "score": None, "reason": f"filtered: {fund_reason}"}
 
         close = df["Close"]
         price = float(close.iloc[-1])
@@ -164,10 +227,11 @@ class ConvictionScorer:
         f_rel = _rel_strength_score(r3, sector_r3)
         f_vol = _volatility_fit(vol)
         f_trigger, fired = _triggers(df)
+        f_fundamental = _fundamental_score(fund)
 
         factors = {
             "sector": f_sector, "trend": f_trend, "rel_strength": f_rel,
-            "volatility": f_vol, "trigger": f_trigger,
+            "volatility": f_vol, "trigger": f_trigger, "fundamental": f_fundamental,
         }
         composite = sum(self.weights[k] * factors[k] for k in self.weights) * 100.0
 
@@ -183,13 +247,20 @@ class ConvictionScorer:
             "ret_6m": round(r6, 1) if r6 is not None else None,
             "ret_12m": round(r12, 1) if r12 is not None else None,
             "rel_sector_3m": round(r3 - sector_r3, 1) if (r3 is not None and sector_r3 is not None) else None,
+            # Fundamental display fields (None when unavailable).
+            "pe": _round(getattr(fund, "pe", None), 1),
+            "peg": _round(getattr(fund, "peg", None), 2),
+            "roe": _round(getattr(fund, "roe", None), 1),
+            "eps_growth": _round(getattr(fund, "eps_growth", None), 1),
+            "debt_equity": _round(getattr(fund, "debt_equity", None), 2),
+            "market_cap": getattr(fund, "market_cap", None),
             "factors": {k: round(v, 2) for k, v in factors.items()},
             "triggers": fired,
-            "reason": self._reason(quadrant, r12, r3, sector_r3, fired),
+            "reason": self._reason(quadrant, r12, r3, sector_r3, fired, fund),
         }
 
     @staticmethod
-    def _reason(quadrant, r12, r3, sector_r3, fired) -> str:
+    def _reason(quadrant, r12, r3, sector_r3, fired, fund=None) -> str:
         parts: list[str] = []
         if quadrant in ("Leading", "Improving"):
             parts.append(f"{quadrant} sector")
@@ -199,4 +270,13 @@ class ConvictionScorer:
             parts.append(f"beats sector +{r3 - sector_r3:.0f}%")
         if fired:
             parts.append(", ".join(fired))
+        if fund is not None:
+            if fund.roe is not None and fund.roe >= 20:
+                parts.append(f"ROE {fund.roe:.0f}%")
+            if fund.peg is not None and 0 < fund.peg <= 1.2:
+                parts.append(f"PEG {fund.peg:.1f}")
         return " · ".join(parts) if parts else "no standout factors"
+
+
+def _round(value, ndigits):
+    return round(value, ndigits) if isinstance(value, (int, float)) else None

@@ -16,6 +16,7 @@ from screener.config import ScreenConfig
 from screener.data.fetcher import DataFetcher
 from screener.data.sectors import load_constituents
 from screener.data.universe import get_ticker_list
+from screener.fundamentals import get_fundamentals
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
 from screener.screeners.sector_rotation import compute_sector_rotation
@@ -32,6 +33,7 @@ def run_daily(
     universe: str = "sp500",
     top_n: int = 15,
     cache_dir: str = "data/yfinance_cache",
+    market: str = "us",
     show_progress: bool = True,
 ) -> dict:
     """Run the full daily pipeline and return the ranked candidates + context."""
@@ -49,6 +51,9 @@ def run_daily(
     sec_map = dict(zip(constituents["Symbol"], constituents["GICS Sector"]))
 
     tickers = get_ticker_list(universe)
+    # 3) Fundamentals from the latest committed snapshot (empty if never refreshed).
+    funds = get_fundamentals(market, tickers)
+
     fetcher = DataFetcher(cache_dir=cache_dir)
     calc = IndicatorCalculator()
     scorer = ConvictionScorer()
@@ -61,10 +66,11 @@ def run_daily(
         if df.empty:
             continue
         df = calc.compute(df, sma_periods=[50, 200], macd_config=_MACD)
-        res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx)
+        res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx,
+                           fund=funds.get(ticker))
         if res is None:
             continue
-        if not res.get("liquidity_ok"):
+        if res.get("score") is None:  # gated (liquidity or fundamental)
             filtered += 1
             continue
         scored.append(res)
@@ -100,7 +106,7 @@ def format_report(result: dict) -> str:
 
     table = PrettyTable()
     table.field_names = ["#", "Ticker", "Score", "Price", "Sector", "Vol%",
-                         "3M", "12M", "Why"]
+                         "3M", "12M", "P/E", "ROE", "Why"]
     table.align = "r"
     table.align["Ticker"] = "l"
     table.align["Sector"] = "l"
@@ -109,7 +115,8 @@ def format_report(result: dict) -> str:
         table.add_row([
             i, r["ticker"], r["score"], r["price"],
             (r["sector"] or "?")[:16], r["daily_vol"],
-            _fmt(r["ret_3m"]), _fmt(r["ret_12m"]), r["reason"][:60],
+            _fmt(r["ret_3m"]), _fmt(r["ret_12m"]),
+            _plain(r.get("pe")), _pct(r.get("roe")), r["reason"][:52],
         ])
     lines.append(table.get_string())
     return "\n".join(lines)
@@ -117,6 +124,14 @@ def format_report(result: dict) -> str:
 
 def _fmt(v) -> str:
     return f"{v:+.0f}" if isinstance(v, (int, float)) else "n/a"
+
+
+def _plain(v) -> str:
+    return f"{v:.1f}" if isinstance(v, (int, float)) else "-"
+
+
+def _pct(v) -> str:
+    return f"{v:.0f}%" if isinstance(v, (int, float)) else "-"
 
 
 def main():
