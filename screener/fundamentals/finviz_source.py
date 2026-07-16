@@ -73,10 +73,14 @@ def fetch(index: str = "S&P 500", limit: int | None = None,
     as_of = _dt.date.today().isoformat()
     filters = {"Index": index}
 
+    # finvizfinance's screener_view can't take limit=None (it does `limit -= size`),
+    # so "all" is expressed as a ceiling above any single index's size.
+    row_cap = 10000 if limit is None else limit
+
     def _view(cls):
         s = cls()
         s.set_filter(filters_dict=filters)
-        return s.screener_view(limit=limit, verbose=0, sleep_sec=sleep_sec)
+        return s.screener_view(limit=row_cap, verbose=0, sleep_sec=sleep_sec)
 
     df_val = _view(Valuation)
     fin = _rows_by_ticker(_view(Financial))
