@@ -40,7 +40,7 @@ US = Market(
 # uneven; the RRG builds a constituent composite where an index returns no data.
 _IN_SECTOR_INDEX = {
     "Information Technology": "^CNXIT",
-    "Financial Services": "NIFTY_FIN_SERVICE",
+    "Financial Services": "^NSEBANK",   # Bank Nifty as a reliable financials proxy
     "Fast Moving Consumer Goods": "^CNXFMCG",
     "Automobile and Auto Components": "^CNXAUTO",
     "Healthcare": "^CNXPHARMA",
