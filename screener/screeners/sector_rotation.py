@@ -12,6 +12,7 @@ from screener.data.sectors import (
     load_constituents,
     resolve_sector,
 )
+from screener.markets import Market, get_market
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def compute_rrg_tails(
     rrg_window: int = 63,
     tail_weeks: int = 12,
     cache_dir: str = "data/yfinance_cache",
+    market: str | Market = "us",
 ) -> dict[str, pd.DataFrame]:
     """RS-Ratio/Momentum trajectory ("tail") for every sector, for an RRG plot.
 
@@ -105,14 +107,15 @@ def compute_rrg_tails(
     where the sector was over the preceding weeks (~12 weeks = 3 months,
     ~26 = 6 months). Returns ``{sector: DataFrame[rs_ratio, rs_momentum, ...]}``.
     """
+    mkt = market if isinstance(market, Market) else get_market(market)
     fetcher = DataFetcher(cache_dir=cache_dir)
-    bench = fetcher.get_data(MARKET_BENCHMARK, start_date, end_date, interval=interval)
+    bench = fetcher.get_data(mkt.benchmark, start_date, end_date, interval=interval)
     if bench.empty:
-        raise RuntimeError(f"No data for market benchmark {MARKET_BENCHMARK}")
+        raise RuntimeError(f"No data for market benchmark {mkt.benchmark}")
     bench_close = bench["Close"]
 
     tails: dict[str, pd.DataFrame] = {}
-    for sector, etf in SECTOR_ETF.items():
+    for sector, etf in mkt.sector_index.items():
         df = fetcher.get_data(etf, start_date, end_date, interval=interval)
         if df.empty:
             continue
@@ -136,23 +139,25 @@ def compute_sector_rotation(
     interval: str = "1d",
     rrg_window: int = 63,
     cache_dir: str = "data/yfinance_cache",
+    market: str | Market = "us",
 ) -> pd.DataFrame:
-    """Build a sector-rotation table: one row per sector ETF vs the market.
+    """Build a sector-rotation table: one row per sector index vs the market.
 
     Columns: sector, etf, last_price, RRG quadrant + phase, RS ratio/momentum,
     trailing returns, and each return relative to the market benchmark.
     Sorted by 3-month relative return, strongest first.
     """
+    mkt = market if isinstance(market, Market) else get_market(market)
     fetcher = DataFetcher(cache_dir=cache_dir)
 
-    bench = fetcher.get_data(MARKET_BENCHMARK, start_date, end_date, interval=interval)
+    bench = fetcher.get_data(mkt.benchmark, start_date, end_date, interval=interval)
     if bench.empty:
-        raise RuntimeError(f"No data for market benchmark {MARKET_BENCHMARK}")
+        raise RuntimeError(f"No data for market benchmark {mkt.benchmark}")
     bench_close = bench["Close"]
     bench_ret = {k: _return_pct(bench_close, d) for k, d in _RETURN_WINDOWS.items()}
 
     rows: list[dict] = []
-    for sector, etf in SECTOR_ETF.items():
+    for sector, etf in mkt.sector_index.items():
         df = fetcher.get_data(etf, start_date, end_date, interval=interval)
         if df.empty:
             logger.warning("No data for %s (%s)", sector, etf)
