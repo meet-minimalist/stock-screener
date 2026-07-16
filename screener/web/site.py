@@ -59,49 +59,25 @@ def _json_for_html(obj: Any) -> str:
     return json.dumps(obj, default=str).replace("<", "\\u003c")
 
 
-def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
-    """Inner page content (style + markup + scripts); no <html>/<head>/<body>.
+def render_screener_body(header_html: str, rows: list[dict],
+                         screen_meta: list[dict], columns: list[dict],
+                         score_label: str = "Min score") -> str:
+    """Generic interactive screener body: a header block + tabbed sortable tables.
 
-    Usable directly as a Claude Artifact and wrappable for GitHub Pages.
+    Reused by both the daily site and the fundamental screener — only the header,
+    records, screens, and columns differ. No <html>/<head>/<body> (Artifact-ready).
     """
-    rows, screen_meta = _payload(result)
-    best = max((r["score"] for r in rows if isinstance(r["score"], (int, float))), default=0)
-    chips = "".join(
-        f'<span class="chip">{html.escape(s)}</span>' for s in result.get("leading_sectors", [])
-    ) or '<span class="muted">none</span>'
-
-    rrg_block = (
-        f'<details class="rrg"><summary>Sector Rotation (RRG) — sectors vs SPY</summary>'
-        f'<img src="{rrg_data_uri}" alt="Relative Rotation Graph of sectors vs SPY"></details>'
-        if rrg_data_uri else ""
-    )
-
     return f"""
 <style>{STYLE}</style>
 <div class="app">
-  <h1>📈 Daily Stock Screener</h1>
-  <div class="meta">As of <b>{html.escape(str(result.get("as_of", "")))}</b> ·
-    universe {html.escape(str(result.get("universe", "")))} ·
-    scored {result.get("scored", 0)} of {result.get("scanned", 0)}
-    (filtered {result.get("filtered_out", 0)})</div>
-
-  <div class="tiles">
-    <div class="tile"><div class="k">{result.get("scored", 0)}</div><div class="l">Passed gate</div></div>
-    <div class="tile"><div class="k">{best:.0f}</div><div class="l">Best score</div></div>
-    <div class="tile"><div class="k">{len(screen_meta)}</div><div class="l">Screens</div></div>
-    <div class="tile"><div class="k">{len(result.get("leading_sectors", []))}</div><div class="l">Tailwind sectors</div></div>
-  </div>
-
-  <div class="chips"><b style="color:var(--muted)">SECTOR TAILWINDS&nbsp;&nbsp;</b>{chips}</div>
-  {rrg_block}
-
+{header_html}
   <div class="tabs" id="tabs" role="tablist"></div>
   <p class="tabdesc" id="tabdesc"></p>
 
   <div class="controls">
     <input type="search" id="search" placeholder="Search ticker or sector…" aria-label="Search">
     <select id="sector" aria-label="Filter by sector"><option value="">All sectors</option></select>
-    <label>Min score <input type="range" id="minscore" min="0" max="100" value="0" step="5">
+    <label>{html.escape(score_label)} <input type="range" id="minscore" min="0" max="100" value="0" step="5">
       <span id="minscoreval">0</span></label>
     <span class="spacer"></span>
     <span class="count" id="count"></span>
@@ -115,10 +91,39 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
 <script>
 const RECORDS = {_json_for_html(rows)};
 const SCREENS = {_json_for_html(screen_meta)};
-const COLUMNS = {_json_for_html(COLUMNS)};
+const COLUMNS = {_json_for_html(columns)};
 </script>
 <script>{SCRIPT}</script>
 """
+
+
+def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
+    """Inner content for the daily technical screener site."""
+    rows, screen_meta = _payload(result)
+    best = max((r["score"] for r in rows if isinstance(r["score"], (int, float))), default=0)
+    chips = "".join(
+        f'<span class="chip">{html.escape(s)}</span>' for s in result.get("leading_sectors", [])
+    ) or '<span class="muted">none</span>'
+    rrg_block = (
+        f'<details class="rrg"><summary>Sector Rotation (RRG) — sectors vs SPY</summary>'
+        f'<img src="{rrg_data_uri}" alt="Relative Rotation Graph of sectors vs SPY"></details>'
+        if rrg_data_uri else ""
+    )
+    header = f"""  <h1>📈 Daily Stock Screener</h1>
+  <div class="meta">As of <b>{html.escape(str(result.get("as_of", "")))}</b> ·
+    universe {html.escape(str(result.get("universe", "")))} ·
+    scored {result.get("scored", 0)} of {result.get("scanned", 0)}
+    (filtered {result.get("filtered_out", 0)}) ·
+    <a href="./fundamentals/">Fundamental screener →</a></div>
+  <div class="tiles">
+    <div class="tile"><div class="k">{result.get("scored", 0)}</div><div class="l">Passed gate</div></div>
+    <div class="tile"><div class="k">{best:.0f}</div><div class="l">Best score</div></div>
+    <div class="tile"><div class="k">{len(screen_meta)}</div><div class="l">Screens</div></div>
+    <div class="tile"><div class="k">{len(result.get("leading_sectors", []))}</div><div class="l">Tailwind sectors</div></div>
+  </div>
+  <div class="chips"><b style="color:var(--muted)">SECTOR TAILWINDS&nbsp;&nbsp;</b>{chips}</div>
+  {rrg_block}"""
+    return render_screener_body(header, rows, screen_meta, COLUMNS)
 
 
 def wrap_page(body: str, title: str = "Daily Stock Screener") -> str:
