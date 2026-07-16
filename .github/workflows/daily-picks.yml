@@ -1,10 +1,12 @@
-name: Daily Screener
+name: Daily Screener (US + India)
 
-# Runs after the US close on weekdays, builds the interactive screener site, and
-# publishes it to GitHub Pages (project site: <user>.github.io/stock-screener/).
+# Builds all four pages (US + India, daily + fundamentals) into one _site and
+# publishes them to GitHub Pages. GitHub Pages serves a single site, so one
+# workflow builds everything and deploys once; each run rebuilds both markets.
 on:
   schedule:
-    - cron: "0 21 * * 1-5"   # 21:00 UTC ~= 1h after the US market close
+    - cron: "30 10 * * 1-5"  # ~1h after the NSE close (15:30 IST = 10:00 UTC)
+    - cron: "0 21 * * 1-5"   # ~1h after the US close
   workflow_dispatch:          # allow manual runs from the Actions tab
 
 permissions:
@@ -68,8 +70,22 @@ jobs:
             --html ./_site/index.html
 
       # Fundamentals-only page from the committed snapshot (no finviz needed here).
-      - name: Build fundamental screener page
+      - name: Build US fundamental page
         run: python -m screener.fundamental_screener --market us --html ./_site/fundamentals/index.html
+
+      # India pages read committed data (nifty list + India snapshot) + .NS prices;
+      # the private screener.in module is only needed by the weekly IN refresh.
+      - name: Build India screener site
+        run: |
+          python -m screener.daily_report \
+            --market in --universe nifty_total \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
+            --top 30 \
+            --html ./_site/in/index.html
+
+      - name: Build India fundamental page
+        run: python -m screener.fundamental_screener --market in --html ./_site/in/fundamentals/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

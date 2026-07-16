@@ -1,0 +1,54 @@
+name: Refresh India Fundamentals
+
+# Weekly screener.in pull for the Nifty Total Market. Uses the PRIVATE
+# screener-in-fetcher module (installed via the GH_PAT secret). Fundamentals
+# change slowly, so once a week is plenty and gentle on screener.in. The dated
+# snapshot is committed back so the daily build reads it.
+on:
+  schedule:
+    - cron: "30 6 * * 6"    # Saturday 06:30 UTC (12:00 IST)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Required: authenticate git so pip can install the private module.
+      - name: Configure access to private modules
+        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pandas>=2.0" lxml requests \
+            "screener-in-fetcher @ git+https://github.com/meet-minimalist/screener.in-fetcher.git"
+
+      - name: Refresh India fundamentals snapshot
+        # Optional login unlocks longer history (set these as repo secrets to use).
+        env:
+          SCREENER_EMAIL: ${{ secrets.SCREENER_EMAIL }}
+          SCREENER_PASSWORD: ${{ secrets.SCREENER_PASSWORD }}
+        run: python -m screener.fundamentals --market in --verbose
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/fundamentals/
+          if git diff --cached --quiet; then
+            echo "No fundamentals changes to commit."
+          else
+            git commit -m "chore(data): weekly India fundamentals snapshot"
+            git push
+          fi
