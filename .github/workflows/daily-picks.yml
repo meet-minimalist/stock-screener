@@ -53,7 +53,7 @@ jobs:
       - name: Build screener site
         run: |
           python -m screener.daily_report \
-            --universe sp500 \
+            --universe sp1500 \
             --start "${{ steps.dates.outputs.start }}" \
             --end "${{ steps.dates.outputs.end }}" \
             --top 30 \

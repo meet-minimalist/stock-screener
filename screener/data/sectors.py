@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import pandas as pd
 
+from screener.paths import TICKERS_DIR
+
 logger = logging.getLogger(__name__)
 
-SP500_CACHE = Path("data/tickers/sp500.csv")
+SP500_CACHE = TICKERS_DIR / "sp500.csv"
+# Any of these cached tier files contribute to the ticker -> GICS sector map.
+_CONSTITUENT_TIERS = ("sp500", "sp400", "sp600")
 
 # Broad-market benchmark that sectors are measured against.
 MARKET_BENCHMARK = "SPY"
@@ -77,20 +80,28 @@ def etf_for_sector(sector: str) -> str:
 
 
 def load_constituents(sector: str | None = None) -> pd.DataFrame:
-    """Return S&P 500 constituents with Symbol + GICS Sector, optionally filtered.
+    """Return index constituents with Symbol + GICS Sector, optionally filtered.
 
-    Symbols are normalised the same way as the universe loader (``.`` -> ``-``)
-    so they match the yfinance/cache convention (e.g. ``BRK.B`` -> ``BRK-B``).
+    Merges every cached S&P tier (500/400/600) that's present so the sector map
+    covers whatever universe is in play (up to the S&P 1500). Symbols are
+    normalised the same way as the universe loader (``.`` -> ``-``) so they match
+    the yfinance/cache convention (e.g. ``BRK.B`` -> ``BRK-B``).
     """
-    if not SP500_CACHE.exists():
+    frames = []
+    for tier in _CONSTITUENT_TIERS:
+        path = TICKERS_DIR / f"{tier}.csv"
+        if path.exists():
+            df = pd.read_csv(path)
+            if "GICS Sector" in df.columns:
+                frames.append(df[["Symbol", "Security", "GICS Sector"]])
+    if not frames:
         raise FileNotFoundError(
-            f"{SP500_CACHE} not found. Run the S&P 500 universe fetch first."
+            f"No constituent files in {TICKERS_DIR}. Run the universe fetch first."
         )
-    df = pd.read_csv(SP500_CACHE)
-    if "GICS Sector" not in df.columns:
-        raise ValueError(f"{SP500_CACHE} has no 'GICS Sector' column.")
-    df = df[["Symbol", "Security", "GICS Sector"]].copy()
-    df["Symbol"] = df["Symbol"].str.replace(".", "-", regex=False).str.strip()
+
+    df = pd.concat(frames, ignore_index=True)
+    df["Symbol"] = df["Symbol"].astype(str).str.replace(".", "-", regex=False).str.strip()
+    df = df.drop_duplicates(subset="Symbol")
     if sector is not None:
         canonical = resolve_sector(sector)
         df = df[df["GICS Sector"] == canonical]

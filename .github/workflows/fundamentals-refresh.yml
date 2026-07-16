@@ -28,7 +28,7 @@ jobs:
           pip install "pandas>=2.0" "finvizfinance>=0.14" lxml requests
 
       - name: Refresh US fundamentals snapshot
-        run: python -m screener.fundamentals --market us --verbose
+        run: python -m screener.fundamentals --market us --universe sp1500 --verbose
 
       - name: Commit snapshot
         run: |

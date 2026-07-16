@@ -47,12 +47,15 @@ def run_daily(
         for _, row in rotation.iterrows()
     }
 
-    # 2) Ticker -> GICS sector map.
+    # 2) Universe first — this also caches the tier files (500/400/600) that the
+    # sector map below reads for sp1500.
+    tickers = get_ticker_list(universe)
+
+    # 3) Ticker -> GICS sector map (covers every cached tier).
     constituents = load_constituents()
     sec_map = dict(zip(constituents["Symbol"], constituents["GICS Sector"]))
 
-    tickers = get_ticker_list(universe)
-    # 3) Fundamentals from the latest committed snapshot (empty if never refreshed).
+    # 4) Fundamentals from the latest committed snapshot (empty if never refreshed).
     funds = get_fundamentals(market, tickers)
 
     fetcher = DataFetcher(cache_dir=cache_dir)
