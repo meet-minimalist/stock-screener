@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install "pandas>=2.0" "numpy<2.1" "pandas-ta>=0.4" "yfinance>=0.2" \
+          pip install "pandas>=2.0" "pandas-ta>=0.4" "yfinance>=0.2" \
             "plotly>=5.15" "kaleido==0.2.1" prettytable tqdm pyyaml lxml requests \
             "yf-cache @ git+https://github.com/meet-minimalist/yf_cache.git"
 
