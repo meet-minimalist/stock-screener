@@ -176,14 +176,15 @@ def main() -> None:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
 
     funds = get_fundamentals(args.market)
-    if not funds:
-        print("No fundamentals snapshot found. Run: python -m screener.fundamentals --market "
-              f"{args.market}")
-        return
-    as_of = next(iter(funds.values())).as_of
+    as_of = next(iter(funds.values())).as_of if funds else ""
     rows, _ = build_rows(funds)
-    print("\n" + format_table(rows, top=args.top))
+    if rows:
+        print("\n" + format_table(rows, top=args.top))
+    else:
+        print("No fundamentals snapshot yet. Run: python -m screener.fundamentals --market "
+              f"{args.market}")
 
+    # Always write the page when requested so the cross-link never 404s.
     if args.html:
         Path(args.html).parent.mkdir(parents=True, exist_ok=True)
         Path(args.html).write_text(build_page(funds, as_of, args.market), encoding="utf-8")

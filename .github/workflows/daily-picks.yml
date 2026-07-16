@@ -59,6 +59,10 @@ jobs:
             --top 30 \
             --html ./_site/index.html
 
+      # Fundamentals-only page from the committed snapshot (no finviz needed here).
+      - name: Build fundamental screener page
+        run: python -m screener.fundamental_screener --market us --html ./_site/fundamentals/index.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
