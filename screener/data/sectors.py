@@ -79,30 +79,41 @@ def etf_for_sector(sector: str) -> str:
     return SECTOR_ETF[resolve_sector(sector)]
 
 
-def load_constituents(sector: str | None = None) -> pd.DataFrame:
-    """Return index constituents with Symbol + GICS Sector, optionally filtered.
+def load_constituents(sector: str | None = None, market: str = "us") -> pd.DataFrame:
+    """Return index constituents as Symbol / Security / sector, optionally filtered.
 
-    Merges every cached S&P tier (500/400/600) that's present so the sector map
-    covers whatever universe is in play (up to the S&P 1500). Symbols are
-    normalised the same way as the universe loader (``.`` -> ``-``) so they match
-    the yfinance/cache convention (e.g. ``BRK.B`` -> ``BRK-B``).
+    - **US**: merges every cached S&P tier (500/400/600) present; sector is the
+      GICS Sector; symbols normalised ``.`` -> ``-`` (yfinance convention).
+    - **India**: reads the cached Nifty Total Market list; sector is NSE's
+      Industry column; symbols kept as the bare NSE symbol.
     """
-    frames = []
-    for tier in _CONSTITUENT_TIERS:
-        path = TICKERS_DIR / f"{tier}.csv"
-        if path.exists():
-            df = pd.read_csv(path)
-            if "GICS Sector" in df.columns:
-                frames.append(df[["Symbol", "Security", "GICS Sector"]])
-    if not frames:
-        raise FileNotFoundError(
-            f"No constituent files in {TICKERS_DIR}. Run the universe fetch first."
-        )
+    market = market.lower()
+    if market == "us":
+        frames = []
+        for tier in _CONSTITUENT_TIERS:
+            path = TICKERS_DIR / f"{tier}.csv"
+            if path.exists():
+                df = pd.read_csv(path)
+                if "GICS Sector" in df.columns:
+                    frames.append(df[["Symbol", "Security", "GICS Sector"]]
+                                  .rename(columns={"GICS Sector": "sector"}))
+        if not frames:
+            raise FileNotFoundError(
+                f"No S&P constituent files in {TICKERS_DIR}. Run the universe fetch first.")
+        df = pd.concat(frames, ignore_index=True)
+        df["Symbol"] = df["Symbol"].astype(str).str.replace(".", "-", regex=False).str.strip()
+    else:
+        path = TICKERS_DIR / "nifty_total.csv"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} not found. Run the Nifty universe fetch first.")
+        df = (pd.read_csv(path)
+              .rename(columns={"Company Name": "Security", "Industry": "sector"})
+              [["Symbol", "Security", "sector"]])
+        df["Symbol"] = df["Symbol"].astype(str).str.strip().str.upper()
 
-    df = pd.concat(frames, ignore_index=True)
-    df["Symbol"] = df["Symbol"].astype(str).str.replace(".", "-", regex=False).str.strip()
     df = df.drop_duplicates(subset="Symbol")
     if sector is not None:
-        canonical = resolve_sector(sector)
-        df = df[df["GICS Sector"] == canonical]
+        canonical = resolve_sector(sector) if market == "us" else sector
+        df = df[df["sector"] == canonical]
     return df.reset_index(drop=True)

@@ -22,6 +22,16 @@ _INDEX_SOURCES = {
 }
 SP1500_TIERS = ("sp500", "sp400", "sp600")
 
+# NSE publishes index constituents as direct CSVs (Company Name, Industry,
+# Symbol, Series, ISIN Code). Symbols are the bare NSE symbol (screener.in form);
+# yfinance needs a ``.NS`` suffix, added at price-fetch time.
+_NSE_SOURCES = {
+    "nifty_total": ("nifty_total.csv",
+                    "https://niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"),
+    "nifty500": ("nifty500.csv",
+                 "https://niftyindices.com/IndexConstituent/ind_nifty500list.csv"),
+}
+
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
@@ -55,6 +65,26 @@ def fetch_index(key: str, force_refresh: bool = False) -> pd.DataFrame:
     return df
 
 
+def fetch_nse_index(key: str, force_refresh: bool = False) -> pd.DataFrame:
+    """Fetch/cache one NSE index's constituents CSV (Company Name, Industry, Symbol)."""
+    if key not in _NSE_SOURCES:
+        raise ValueError(f"Unknown NSE index '{key}'. Known: {', '.join(_NSE_SOURCES)}")
+    _ensure_cache_dir()
+    filename, url = _NSE_SOURCES[key]
+    cache = CACHE_DIR / filename
+    if cache.exists() and not force_refresh:
+        return pd.read_csv(cache)
+
+    logger.info("Fetching %s constituents from NSE...", key)
+    resp = requests.get(url, headers=_HEADERS, timeout=30)
+    resp.raise_for_status()
+    df = pd.read_csv(StringIO(resp.text))
+    df["Symbol"] = df["Symbol"].astype(str).str.strip().str.upper()
+    df.to_csv(cache, index=False)
+    logger.info("Cached %d %s tickers", len(df), key)
+    return df
+
+
 def _index_symbols(key: str, force_refresh: bool = False) -> list[str]:
     return sorted(fetch_index(key, force_refresh)["Symbol"].dropna().tolist())
 
@@ -78,6 +108,8 @@ def get_ticker_list(source: str = "sp500", force_refresh: bool = False) -> list[
         for tier in SP1500_TIERS:
             symbols.update(_index_symbols(tier, force_refresh))
         return sorted(symbols)
+    if source in _NSE_SOURCES:
+        return sorted(fetch_nse_index(source, force_refresh)["Symbol"].dropna().tolist())
     if source.endswith(".csv"):
         path = Path(source)
         if not path.exists():

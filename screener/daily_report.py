@@ -17,6 +17,7 @@ from screener.data.fetcher import DataFetcher
 from screener.data.sectors import load_constituents
 from screener.data.universe import get_ticker_list
 from screener.fundamentals import get_fundamentals
+from screener.markets import get_market
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
 from screener.screeners.sector_rotation import compute_sector_rotation
@@ -38,25 +39,26 @@ def run_daily(
     show_progress: bool = True,
 ) -> dict:
     """Run the full daily pipeline and return the ranked candidates + context."""
+    mkt = get_market(market)
+
     # 1) Sector context (RRG quadrant + returns per sector) — computed once.
     rotation = compute_sector_rotation(start_date, end_date, interval=interval,
-                                       cache_dir=cache_dir)
+                                       cache_dir=cache_dir, market=mkt)
     sector_ctx = {
         row["sector"]: {"quadrant": row["quadrant"], "etf": row["etf"],
                         "ret_3m": row["ret_3m"], "ret_6m": row["ret_6m"]}
         for _, row in rotation.iterrows()
     }
 
-    # 2) Universe first — this also caches the tier files (500/400/600) that the
-    # sector map below reads for sp1500.
+    # 2) Universe first — this also caches the constituent files the sector map reads.
     tickers = get_ticker_list(universe)
 
-    # 3) Ticker -> GICS sector map (covers every cached tier).
-    constituents = load_constituents()
-    sec_map = dict(zip(constituents["Symbol"], constituents["GICS Sector"]))
+    # 3) Ticker -> sector map (GICS for US, NSE Industry for India).
+    constituents = load_constituents(market=mkt.key)
+    sec_map = dict(zip(constituents["Symbol"], constituents["sector"]))
 
     # 4) Fundamentals from the latest committed snapshot (empty if never refreshed).
-    funds = get_fundamentals(market, tickers)
+    funds = get_fundamentals(mkt.key, tickers)
 
     fetcher = DataFetcher(cache_dir=cache_dir)
     calc = IndicatorCalculator()
@@ -66,7 +68,8 @@ def run_daily(
     filtered = 0
     iterator = tqdm(tickers, desc="Scoring", unit="ticker") if show_progress else tickers
     for ticker in iterator:
-        df = fetcher.get_data(ticker, start_date, end_date, interval=interval)
+        # Records key by the bare symbol; prices use the market's yfinance suffix.
+        df = fetcher.get_data(ticker + mkt.ticker_suffix, start_date, end_date, interval=interval)
         if df.empty:
             continue
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
