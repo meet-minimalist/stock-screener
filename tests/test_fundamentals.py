@@ -1,7 +1,26 @@
 from __future__ import annotations
 
 from screener.fundamentals import store
+from screener.fundamentals.finviz_source import _chunks, _resolve
 from screener.fundamentals.schema import Fundamentals, to_float, to_pct
+
+
+def test_resolve_maps_returned_ticker_to_requested():
+    req = {"AAPL": "AAPL", "MSFT": "MSFT", "AA": "AA"}
+    assert _resolve("AAPL", req) == "AAPL"      # direct (real finviz)
+    assert _resolve("AAAPL", req) == "AAPL"     # sandbox doubled first char
+    assert _resolve("MMSFT", req) == "MSFT"
+    assert _resolve("AA", req) == "AA"           # real doubled ticker matches directly
+    assert _resolve("ZZZZ", req) is None         # not something we asked for
+
+
+def test_resolve_dedoubles_only_into_requested_set():
+    # "A" was requested (not "AA"); returned "AA" must resolve to "A".
+    assert _resolve("AA", {"A": "A"}) == "A"
+
+
+def test_chunks_splits_evenly():
+    assert list(_chunks([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
 
 
 def test_to_pct_normalises_strings_and_fractions():
