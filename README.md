@@ -1,12 +1,17 @@
 # stock-screener
 
-A stock screener and daily selection tool for US equities (S&P 500). It blends
-technicals, sector rotation, and fundamentals into a single **Daily Conviction
-Score**, publishes a hands-off **interactive dashboard** to GitHub Pages every
-trading day, and also offers a CLI and a Streamlit app for interactive work.
+A stock screener and daily selection tool for the **US (S&P 1500)** and **India
+(Nifty Total Market)**. It blends technicals, sector rotation, and fundamentals
+into a single **Daily Conviction Score**, publishes a hands-off **interactive
+dashboard** to GitHub Pages every trading day, and also offers a CLI and a
+Streamlit app for interactive work.
 
 Price data is pulled from Yahoo Finance and cached on disk; fundamentals come from
-finviz and are snapshotted over time. Repeated scans are fast after the first run.
+finviz (US) and screener.in (India) and are snapshotted over time. Repeated scans
+are fast after the first run.
+
+Each market is a [`Market`](screener/markets.py) config (benchmark, sector indices,
+universe, currency, fundamentals source), so the same pipeline runs both.
 
 ## Features
 
@@ -14,9 +19,14 @@ finviz and are snapshotted over time. Repeated scans are fast after the first ru
   RRG tailwind, trend strength, relative strength vs its own sector, tradeable
   volatility, a fresh daily trigger, and fundamentals, behind liquidity and
   fundamental gates. See [`scoring.py`](screener/scoring.py).
-- **Fundamental analysis** — value (P/E, PEG), quality (ROE, margins), and growth
-  (EPS/sales) pulled in bulk from finviz; used as a gate, a scored factor, and
-  displayed columns. Snapshots accumulate under `data/fundamentals/`.
+- **Fundamental analysis** — value, quality, and growth metrics used as a gate, a
+  scored factor, and displayed columns, plus a dedicated A–F **fundamental
+  screener**. US via finviz (bulk); India via the private
+  [`screener-in-fetcher`](https://github.com/meet-minimalist/screener.in-fetcher)
+  screener.in module. Snapshots accumulate under `data/fundamentals/<market>/`.
+- **Two markets** — US (S&P 1500) and India (Nifty Total Market, `.NS` prices,
+  NSE Industry sectors, Nifty sector-index RRG). Cross-linked pages: `/`,
+  `/fundamentals/`, `/in/`, `/in/fundamentals/`.
 - **Interactive multi-tab screener** — a ChartMill-style hosted page: every
   screen (Top Picks, Volatile Uptrends, 52-week-high breakouts, Sector Leaders,
   Value + Momentum, Quality Compounders, candlestick patterns, …) is a sortable,
@@ -89,16 +99,17 @@ or the ETF ticker (`XLF`).
 ### Daily conviction report & interactive site
 
 ```bash
-# Console table of the top-ranked names (needs ~18 months of history)
+# US (default market). Console table of the top-ranked names.
 python -m screener.daily_report --start 2024-06-22 --end 2026-06-22 --top 20
 
-# Also emit the interactive multi-tab screener page (open it in a browser)
-python -m screener.daily_report --start 2024-06-22 --end 2026-06-22 --html site/index.html
+# India: full Nifty pipeline (.NS prices, Nifty RRG), interactive page
+python -m screener.daily_report --market in --universe nifty_total \
+  --start 2024-06-22 --end 2026-06-22 --html site/in/index.html
 ```
 
-The pipeline computes sector context, scores every S&P 500 constituent, tags each
-with the screens it belongs to, and (with `--html`) writes a self-contained page
-with a tab per screen, the sector RRG, and sortable/filterable/searchable tables.
+The pipeline computes sector context, scores every constituent, tags each with the
+screens it belongs to, and (with `--html`) writes a self-contained page with a tab
+per screen, the sector RRG, and sortable/filterable/searchable tables.
 
 ### Streamlit app
 
@@ -114,28 +125,35 @@ Opens at http://localhost:8501 with two tabs:
 
 ## Fundamentals
 
-Fundamentals are pulled in bulk from finviz and normalised into a common schema
-([`screener/fundamentals/`](screener/fundamentals/)):
+Both sources normalise into one schema ([`screener/fundamentals/`](screener/fundamentals/)),
+so grading and the screener are shared:
 
 ```bash
-python -m screener.fundamentals --market us      # refresh the US snapshot
+python -m screener.fundamentals --market us      # finviz  -> data/fundamentals/us/
+python -m screener.fundamentals --market in      # screener.in -> data/fundamentals/in/
 ```
 
-Each refresh writes a dated snapshot **and** a `latest.csv` under
-`data/fundamentals/us/`. finviz keeps no history, so these snapshots become our
-own accumulating dataset. The daily run only reads the committed `latest.csv` — it
-never scrapes — so a missing snapshot simply leaves the fundamental factor neutral.
+Each refresh writes a dated snapshot **and** a `latest.csv` per market — the sites
+keep no history, so these snapshots become our own accumulating dataset. The daily
+run only reads the committed `latest.csv` (it never scrapes), so a missing snapshot
+just leaves the fundamental factor neutral. India uses the **private**
+`screener-in-fetcher` module; optional screener.in login via `SCREENER_EMAIL` /
+`SCREENER_PASSWORD`.
 
 ## Automated daily publishing (GitHub Actions → Pages)
 
-Two workflows keep everything hands-off:
+Enable Pages once via **Settings → Pages → Build and deployment → Source: GitHub
+Actions** (needs a public repo, or a paid plan for private). Three workflows:
 
-- **`daily-picks.yml`** — after the US close on weekdays, builds the interactive
-  site and deploys it to GitHub Pages (project site:
-  `https://<user>.github.io/stock-screener/`). Enable it once via **Settings →
-  Pages → Build and deployment → Source: GitHub Actions**.
-- **`fundamentals-refresh.yml`** — weekly, refreshes the finviz snapshot and
-  commits it back to the repo.
+- **`daily-picks.yml`** — after each market close, builds all four pages (US +
+  India, daily + fundamentals) into one site and deploys to
+  `https://<user>.github.io/stock-screener/`. A single deploy because Pages serves
+  one site.
+- **`fundamentals-refresh.yml`** — weekly finviz (US) snapshot, committed back.
+- **`india-fundamentals.yml`** — weekly screener.in (India) snapshot, committed
+  back. Installs the private module, so it needs a **`GH_PAT`** repo secret whose
+  token has **read access to `screener.in-fetcher`** (a fine-grained token scoped
+  to that repo, Contents: Read).
 
 ## Understanding the Relative Rotation Graph
 
