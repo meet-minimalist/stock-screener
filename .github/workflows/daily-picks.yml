@@ -19,12 +19,20 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}   # read-access PAT for the private yf_cache repo
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # Only fires once GH_PAT is set — lets pip install yf_cache when it's a
+      # private repo. No-op (and yf_cache stays installable as public) until then.
+      - name: Configure access to private modules
+        if: ${{ env.GH_PAT != '' }}
+        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
 
       # Reuse the downloaded price cache between runs so daily runs stay fast.
       - name: Restore price-data cache
