@@ -59,9 +59,31 @@ def _json_for_html(obj: Any) -> str:
     return json.dumps(obj, default=str).replace("<", "\\u003c")
 
 
+# The four deployed pages, their path from the site root, and their depth (how
+# many levels up to reach the root) — used to build relative cross-links.
+_PAGES = [
+    ("us_daily", "🇺🇸 US Screener", ""),
+    ("us_fund", "🇺🇸 US Fundamentals", "fundamentals/"),
+    ("in_daily", "🇮🇳 India Screener", "in/"),
+    ("in_fund", "🇮🇳 India Fundamentals", "in/fundamentals/"),
+]
+_DEPTH = {"us_daily": 0, "us_fund": 1, "in_daily": 1, "in_fund": 2}
+
+
+def nav_html(current: str) -> str:
+    """A cross-page/cross-market nav bar with relative links from ``current``."""
+    up = "../" * _DEPTH[current]
+    links = []
+    for key, label, path in _PAGES:
+        href = (up + path) or "./"
+        cls = "navlink active" if key == current else "navlink"
+        links.append(f'<a class="{cls}" href="{href}">{label}</a>')
+    return '<nav class="nav">' + "".join(links) + "</nav>"
+
+
 def render_screener_body(header_html: str, rows: list[dict],
                          screen_meta: list[dict], columns: list[dict],
-                         score_label: str = "Min score") -> str:
+                         score_label: str = "Min score", currency: str = "$") -> str:
     """Generic interactive screener body: a header block + tabbed sortable tables.
 
     Reused by both the daily site and the fundamental screener — only the header,
@@ -89,6 +111,7 @@ def render_screener_body(header_html: str, rows: list[dict],
   </div>
 </div>
 <script>
+const CURRENCY = {_json_for_html(currency)};
 const RECORDS = {_json_for_html(rows)};
 const SCREENS = {_json_for_html(screen_meta)};
 const COLUMNS = {_json_for_html(columns)};
@@ -98,18 +121,23 @@ const COLUMNS = {_json_for_html(columns)};
 
 
 def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
-    """Inner content for the daily technical screener site."""
+    """Inner content for the daily technical screener site (market-aware)."""
     rows, screen_meta = _payload(result)
+    market = result.get("market", "us")
+    label = result.get("market_label", "US")
+    currency = result.get("currency", "$")
+    benchmark = "Nifty" if market == "in" else "SPY"
     best = max((r["score"] for r in rows if isinstance(r["score"], (int, float))), default=0)
     chips = "".join(
         f'<span class="chip">{html.escape(s)}</span>' for s in result.get("leading_sectors", [])
     ) or '<span class="muted">none</span>'
     rrg_block = (
-        f'<details class="rrg"><summary>Sector Rotation (RRG) — sectors vs SPY</summary>'
-        f'<img src="{rrg_data_uri}" alt="Relative Rotation Graph of sectors vs SPY"></details>'
+        f'<details class="rrg"><summary>Sector Rotation (RRG) — sectors vs {benchmark}</summary>'
+        f'<img src="{rrg_data_uri}" alt="Relative Rotation Graph of sectors vs {benchmark}"></details>'
         if rrg_data_uri else ""
     )
-    header = f"""  <h1>📈 Daily Stock Screener</h1>
+    header = f"""  {nav_html(f"{market}_daily")}
+  <h1>📈 {html.escape(label)} Daily Screener</h1>
   <div class="meta">As of <b>{html.escape(str(result.get("as_of", "")))}</b> ·
     universe {html.escape(str(result.get("universe", "")))} ·
     scored {result.get("scored", 0)} of {result.get("scanned", 0)}
@@ -123,7 +151,7 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
   </div>
   <div class="chips"><b style="color:var(--muted)">SECTOR TAILWINDS&nbsp;&nbsp;</b>{chips}</div>
   {rrg_block}"""
-    return render_screener_body(header, rows, screen_meta, COLUMNS)
+    return render_screener_body(header, rows, screen_meta, COLUMNS, currency=currency)
 
 
 def wrap_page(body: str, title: str = "Daily Stock Screener") -> str:

@@ -23,6 +23,11 @@ STYLE = """
   max-width:1280px; margin:0 auto; padding:24px 20px 72px; }
 .app h1 { font-size:1.5rem; margin:0 0 2px; }
 .meta { color:var(--ink2); font-size:.85rem; margin-bottom:18px; }
+.nav { display:flex; flex-wrap:wrap; gap:4px; margin:0 0 16px; }
+.navlink { font-size:.82rem; color:var(--ink2); text-decoration:none; padding:5px 10px;
+  border-radius:8px; border:1px solid var(--line); }
+.navlink:hover { background:var(--line2); color:var(--ink); }
+.navlink.active { color:var(--ink); border-color:var(--accent); font-weight:600; }
 .tiles { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
 .tile { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 16px; min-width:118px; }
 .tile .k { font-size:1.45rem; font-weight:650; font-variant-numeric:tabular-nums; }
@@ -100,7 +105,7 @@ SCRIPT = r"""
       case "score": return '<span class="score" style="background:' + tierColor(v) + '">' + v.toFixed(0) + "</span>";
       case "pct": return (typeof v === "number") ? v.toFixed(0) + "%" : v;
       case "ret": { var c = v > 0 ? "pos" : v < 0 ? "neg" : "muted"; return '<span class="' + c + '">' + (v>0?"+":"") + v.toFixed(0) + "%</span>"; }
-      case "money": return "$" + Number(v).toLocaleString(undefined, {maximumFractionDigits:2});
+      case "money": return (typeof CURRENCY === "undefined" ? "$" : CURRENCY) + Number(v).toLocaleString(undefined, {maximumFractionDigits:2});
       case "num": return (typeof v === "number") ? v.toFixed(col.dp==null?1:col.dp) : v;
       case "factors": {
         var out = '<span class="fbars">', keys = ["sector","trend","rel_strength","volatility","trigger","fundamental"];

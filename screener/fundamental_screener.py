@@ -16,7 +16,7 @@ import html
 from prettytable import PrettyTable
 
 from screener.fundamentals import get_fundamentals, grade
-from screener.web import render_screener_body, wrap_page
+from screener.web import nav_html, render_screener_body, wrap_page
 
 logger = logging.getLogger(__name__)
 
@@ -114,14 +114,17 @@ def build_rows(funds: dict) -> tuple[list[dict], list[dict]]:
     return rows, screen_meta
 
 
-def build_body(funds: dict, as_of: str = "", universe: str = "sp500") -> str:
+def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
+    from screener.markets import get_market
+    mkt = get_market(market)
     rows, screen_meta = build_rows(funds)
     grades = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
     for r in rows:
         grades[r["letter"]] = grades.get(r["letter"], 0) + 1
     best = max((r["score"] for r in rows), default=0)
-    header = f"""  <h1>🧮 Fundamental Screener</h1>
-  <div class="meta">As of <b>{html.escape(str(as_of))}</b> · universe {html.escape(universe)} ·
+    header = f"""  {nav_html(f"{mkt.key}_fund")}
+  <h1>🧮 {html.escape(mkt.label)} Fundamental Screener</h1>
+  <div class="meta">As of <b>{html.escape(str(as_of))}</b> ·
     graded {len(rows)} stocks · <a href="../">← Daily screener</a></div>
   <div class="tiles">
     <div class="tile"><div class="k">{len(rows)}</div><div class="l">Graded</div></div>
@@ -129,11 +132,14 @@ def build_body(funds: dict, as_of: str = "", universe: str = "sp500") -> str:
     <div class="tile"><div class="k">{best:.0f}</div><div class="l">Best overall</div></div>
     <div class="tile"><div class="k">{len(screen_meta)}</div><div class="l">Screens</div></div>
   </div>"""
-    return render_screener_body(header, rows, screen_meta, COLUMNS, score_label="Min grade")
+    return render_screener_body(header, rows, screen_meta, COLUMNS,
+                                score_label="Min grade", currency=mkt.currency)
 
 
-def build_page(funds: dict, as_of: str = "", universe: str = "sp500") -> str:
-    return wrap_page(build_body(funds, as_of, universe), title="Fundamental Screener")
+def build_page(funds: dict, as_of: str = "", market: str = "us") -> str:
+    from screener.markets import get_market
+    label = get_market(market).label
+    return wrap_page(build_body(funds, as_of, market), title=f"{label} Fundamental Screener")
 
 
 def format_table(rows: list[dict], top: int = 25) -> str:

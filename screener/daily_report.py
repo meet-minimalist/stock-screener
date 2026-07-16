@@ -91,6 +91,9 @@ def run_daily(
     return {
         "as_of": end_date,
         "universe": universe,
+        "market": mkt.key,
+        "market_label": mkt.label,
+        "currency": mkt.currency,
         "scanned": len(tickers),
         "scored": len(scored),
         "filtered_out": filtered,

@@ -32,7 +32,7 @@ def _rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def build_rrg_chart(tails: dict[str, pd.DataFrame]) -> go.Figure:
+def build_rrg_chart(tails: dict[str, pd.DataFrame], benchmark_label: str = "SPY") -> go.Figure:
     """Relative Rotation Graph: RS-Ratio (x) vs RS-Momentum (y), 100 = neutral.
 
     Each sector is drawn as a tail (its weekly path) ending in a labelled head
@@ -118,7 +118,7 @@ def build_rrg_chart(tails: dict[str, pd.DataFrame]) -> go.Figure:
         ))
 
     fig.update_layout(
-        title="Relative Rotation Graph — sectors vs SPY (head = now, tail = past weeks)",
+        title=f"Relative Rotation Graph — sectors vs {benchmark_label} (head = now, tail = past weeks)",
         xaxis_title="RS-Ratio  (relative strength →)",
         yaxis_title="RS-Momentum  (strengthening ↑)",
         xaxis=dict(range=[lo, hi], zeroline=False),
