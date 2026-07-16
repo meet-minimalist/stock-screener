@@ -10,14 +10,19 @@ logger = logging.getLogger(__name__)
 
 
 def _fetch_us(**kwargs) -> dict[str, Fundamentals]:
-    # Imported lazily so the daily pipeline never needs finvizfinance installed
+    # Imported lazily so the daily pipeline never needs the sources installed
     # (it only reads the committed snapshot); only refreshes pull the source.
     from screener.fundamentals import finviz_source
     return finviz_source.fetch(**kwargs)
 
 
-# market key -> source fetcher. India (screener.in) will register here later.
-_SOURCES = {"us": _fetch_us}
+def _fetch_in(**kwargs) -> dict[str, Fundamentals]:
+    from screener.fundamentals import screener_in_source
+    return screener_in_source.fetch(**kwargs)
+
+
+# market key -> source fetcher.
+_SOURCES = {"us": _fetch_us, "in": _fetch_in}
 
 
 def refresh_market(market: str = "us", **source_kwargs) -> dict[str, Fundamentals]:
