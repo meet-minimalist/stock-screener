@@ -42,6 +42,7 @@ COLUMNS = [
     {"key": "sales_growth", "label": "Sales gr", "type": "pct"},
     {"key": "debt_equity", "label": "D/E", "type": "num", "dp": 2},
     {"key": "current_ratio", "label": "Curr R", "type": "num", "dp": 2},
+    {"key": "promoter_holding", "label": "Prom %", "type": "pct"},
     {"key": "sector", "label": "Sector", "type": "text", "align": "left"},
     {"key": "industry", "label": "Industry", "type": "text", "align": "left"},
 ]
@@ -85,7 +86,7 @@ SCREENS: list[FScreen] = [
 
 _ROW_METRICS = ["pe", "forward_pe", "peg", "ps", "roe", "roa", "net_margin",
                 "eps_growth", "sales_growth", "debt_equity", "current_ratio",
-                "dividend_yield", "sector", "industry", "market_cap"]
+                "dividend_yield", "promoter_holding", "sector", "industry", "market_cap"]
 
 
 def build_rows(funds: dict) -> tuple[list[dict], list[dict]]:

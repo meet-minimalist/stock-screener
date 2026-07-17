@@ -30,6 +30,16 @@ def _yoy(row) -> float | None:
     return None
 
 
+def _cagr(row, years: int) -> float | None:
+    """Compound annual growth % over the last ``years`` periods (needs positive ends)."""
+    vals = [v for v in (_num(x) for x in row) if v is not None]
+    if len(vals) > years:
+        start, end = vals[-years - 1], vals[-1]
+        if start > 0 and end > 0:
+            return ((end / start) ** (1.0 / years) - 1.0) * 100.0
+    return None
+
+
 def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fundamentals:
     """Map a screener.in Company (top_ratios + statements) to the shared schema.
 
@@ -41,7 +51,7 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
     price = _num(tr.get("Current Price"))
     book = _num(tr.get("Book Value"))
 
-    net_margin = oper_margin = eps_growth = sales_growth = debt_equity = None
+    net_margin = oper_margin = eps_growth = eps_growth_5y = sales_growth = debt_equity = None
     try:
         pl = company.profit_loss
         if "OPM %" in pl.index:
@@ -50,12 +60,22 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
             np_, sales = _last(pl.loc["Net Profit"]), _last(pl.loc["Sales"])
             if np_ is not None and sales:
                 net_margin = np_ / sales * 100.0
+        # Multi-year CAGR from the full P&L — sturdier than a 2-year YoY.
         if "EPS in Rs" in pl.index:
-            eps_growth = _yoy(pl.loc["EPS in Rs"])
+            eps_growth = _cagr(pl.loc["EPS in Rs"], 3)
+            eps_growth_5y = _cagr(pl.loc["EPS in Rs"], 5)
         if "Sales" in pl.index:
-            sales_growth = _yoy(pl.loc["Sales"])
+            sales_growth = _cagr(pl.loc["Sales"], 3)
     except Exception as exc:
         logger.debug("profit_loss parse failed for %s: %s", symbol, exc)
+
+    promoter_holding = None
+    try:
+        sh = company.shareholding()          # parsed from the same cached page
+        if "Promoters" in sh.index:
+            promoter_holding = _last(sh.loc["Promoters"])
+    except Exception as exc:
+        logger.debug("shareholding parse failed for %s: %s", symbol, exc)
     try:
         bs = company.balance_sheet
         borrow = _last(bs.loc["Borrowings"]) if "Borrowings" in bs.index else None
@@ -77,7 +97,9 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
         roi=_num(tr.get("ROCE")),          # screener.in reports ROCE
         dividend_yield=_num(tr.get("Dividend Yield")),
         net_margin=net_margin, oper_margin=oper_margin,
-        eps_growth=eps_growth, sales_growth=sales_growth, debt_equity=debt_equity,
+        eps_growth=eps_growth, eps_growth_5y=eps_growth_5y,
+        sales_growth=sales_growth, debt_equity=debt_equity,
+        promoter_holding=promoter_holding,
     )
 
 

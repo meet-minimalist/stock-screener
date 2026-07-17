@@ -48,9 +48,11 @@ def _value(f: Fundamentals) -> float | None:
 
 
 def _quality(f: Fundamentals) -> float | None:
+    # promoter_holding is an India governance signal (skin in the game); None for
+    # US, so it simply doesn't contribute there.
     return _avg(_ramp(f.roe, 0, 25), _ramp(f.roa, 0, 12), _ramp(f.roi, 0, 20),
                 _ramp(f.gross_margin, 0, 60), _ramp(f.oper_margin, 0, 25),
-                _ramp(f.net_margin, 0, 20))
+                _ramp(f.net_margin, 0, 20), _ramp(f.promoter_holding, 25, 55))
 
 
 def _growth(f: Fundamentals) -> float | None:

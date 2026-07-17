@@ -104,6 +104,9 @@ class Fundamentals:
     insider_own: float | None = None
     inst_own: float | None = None
     short_float: float | None = None
+    # India (screener.in) governance signals (percentages)
+    promoter_holding: float | None = None
+    pledged_pct: float | None = None
 
     def to_row(self) -> dict:
         return asdict(self)
