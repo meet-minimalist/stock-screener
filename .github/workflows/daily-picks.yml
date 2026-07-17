@@ -1,13 +1,13 @@
 name: Daily Screener (US + India)
 
-# Builds all four pages (US + India, daily + fundamentals) into one _site and
-# publishes them to GitHub Pages. GitHub Pages serves a single site, so one
-# workflow builds everything and deploys once; each run rebuilds both markets.
+# US and India build on SEPARATE runners (separate IPs) so their Yahoo price
+# fetches don't share a rate-limit budget; a final job merges both into one
+# _site and deploys to GitHub Pages (which serves a single site).
 on:
   schedule:
     - cron: "30 10 * * 1-5"  # ~1h after the NSE close (15:30 IST = 10:00 UTC)
     - cron: "0 21 * * 1-5"   # ~1h after the US close
-  workflow_dispatch:          # allow manual runs from the Actions tab
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,86 +19,100 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-us:
     runs-on: ubuntu-latest
-    env:
-      GH_PAT: ${{ secrets.GH_PAT }}   # read-access PAT for the private yf_cache repo
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      # Only fires once GH_PAT is set — lets pip install yf_cache when it's a
-      # private repo. No-op (and yf_cache stays installable as public) until then.
-      - name: Configure access to private modules
-        if: ${{ env.GH_PAT != '' }}
-        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
-
-      # Reuse the downloaded price cache between runs so daily runs stay fast.
-      - name: Restore price-data cache
+      # One cache per run; rolls forward from the latest via restore-keys.
+      - name: Restore US price cache
         uses: actions/cache@v4
         with:
           path: data/yfinance_cache
-          key: yfcache-${{ github.run_id }}
-          restore-keys: yfcache-
-
-      # Lean deps: the daily job needs pandas-ta (not native TA-Lib) and reads the
-      # committed fundamentals snapshot (so no finvizfinance here). Pin kaleido to
-      # the self-contained 0.2.1 for headless PNG export of the RRG chart.
+          key: yfcache-us-${{ github.run_id }}
+          restore-keys: |
+            yfcache-us-
+            yfcache-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           pip install "pandas>=2.0" "pandas-ta>=0.4" "yfinance>=0.2" \
             "plotly>=5.15" "kaleido==0.2.1" prettytable tqdm pyyaml lxml requests \
             "yf-cache @ git+https://github.com/meet-minimalist/yf_cache.git"
-
       - name: Compute date window
         id: dates
         run: |
           echo "end=$(date -u +%F)" >> "$GITHUB_OUTPUT"
           echo "start=$(date -u -d '550 days ago' +%F)" >> "$GITHUB_OUTPUT"
-
-      - name: Build screener site
+      - name: Build US pages
         run: |
-          python -m screener.daily_report \
-            --universe sp1500 \
-            --start "${{ steps.dates.outputs.start }}" \
-            --end "${{ steps.dates.outputs.end }}" \
-            --top 30 \
-            --html ./_site/index.html
-
-      # Fundamentals-only page from the committed snapshot (no finviz needed here).
-      - name: Build US fundamental page
-        run: python -m screener.fundamental_screener --market us --html ./_site/fundamentals/index.html
-
-      # India pages read committed data (nifty list + India snapshot) + .NS prices;
-      # the private screener.in module is only needed by the weekly IN refresh.
-      - name: Build India screener site
-        run: |
-          python -m screener.daily_report \
-            --market in --universe nifty_total \
-            --start "${{ steps.dates.outputs.start }}" \
-            --end "${{ steps.dates.outputs.end }}" \
-            --top 30 \
-            --html ./_site/in/index.html
-
-      - name: Build India fundamental page
-        run: python -m screener.fundamental_screener --market in --html ./_site/in/fundamentals/index.html
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+          python -m screener.daily_report --market us --universe sp1500 \
+            --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
+            --top 30 --html ./_site/index.html
+          python -m screener.fundamental_screener --market us --html ./_site/fundamentals/index.html
+      - name: Upload US site
+        uses: actions/upload-artifact@v4
         with:
+          name: site-us
+          path: ./_site
+
+  build-in:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore India price cache
+        uses: actions/cache@v4
+        with:
+          path: data/yfinance_cache
+          key: yfcache-in-${{ github.run_id }}
+          restore-keys: |
+            yfcache-in-
+            yfcache-
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install "pandas>=2.0" "pandas-ta>=0.4" "yfinance>=0.2" \
+            "plotly>=5.15" "kaleido==0.2.1" prettytable tqdm pyyaml lxml requests \
+            "yf-cache @ git+https://github.com/meet-minimalist/yf_cache.git"
+      - name: Compute date window
+        id: dates
+        run: |
+          echo "end=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          echo "start=$(date -u -d '550 days ago' +%F)" >> "$GITHUB_OUTPUT"
+      - name: Build India pages
+        run: |
+          python -m screener.daily_report --market in --universe nifty_total \
+            --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
+            --top 30 --html ./_site/in/index.html
+          python -m screener.fundamental_screener --market in --html ./_site/in/fundamentals/index.html
+      - name: Upload India site
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-in
           path: ./_site
 
   deploy:
-    needs: build
+    needs: [build-us, build-in]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Merge both markets into one site
+        uses: actions/download-artifact@v4
+        with:
+          pattern: site-*
+          merge-multiple: true
+          path: _site
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

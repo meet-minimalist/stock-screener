@@ -9,6 +9,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+import pandas as pd
 from prettytable import PrettyTable
 from tqdm import tqdm
 
@@ -42,8 +43,15 @@ def run_daily(
     mkt = get_market(market)
 
     # 1) Sector context (RRG quadrant + returns per sector) — computed once.
-    rotation = compute_sector_rotation(start_date, end_date, interval=interval,
-                                       cache_dir=cache_dir, market=mkt)
+    # A benchmark/data hiccup (e.g. Yahoo rate-limiting) must not sink the whole
+    # run: fall back to no sector context so the page still builds.
+    try:
+        rotation = compute_sector_rotation(start_date, end_date, interval=interval,
+                                           cache_dir=cache_dir, market=mkt)
+    except Exception as exc:
+        logger.warning("Sector rotation unavailable for %s (%s); continuing without it",
+                       mkt.key, exc)
+        rotation = pd.DataFrame()
     sector_ctx = {
         row["sector"]: {"quadrant": row["quadrant"], "etf": row["etf"],
                         "ret_3m": row["ret_3m"], "ret_6m": row["ret_6m"]}
