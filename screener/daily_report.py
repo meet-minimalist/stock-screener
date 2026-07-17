@@ -150,6 +150,7 @@ def _pct(v) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Daily conviction-ranked stock picks")
     parser.add_argument("--config", "-c", type=str, default="config.yaml")
+    parser.add_argument("--market", "-m", type=str, default="us", help="Market: us or in")
     parser.add_argument("--universe", "-u", type=str, default=None)
     parser.add_argument("--start", type=str, default=None)
     parser.add_argument("--end", type=str, default=None)
@@ -176,13 +177,15 @@ def main():
     start = args.start or config.start_date
     end = args.end or config.end_date
     interval = args.interval or config.interval
+    mkt = get_market(args.market)
     result = run_daily(
         start_date=start,
         end_date=end,
         interval=interval,
-        universe=args.universe or config.universe,
+        universe=args.universe or mkt.universe,
         top_n=args.top,
         cache_dir=config.cache_dir,
+        market=mkt.key,
     )
 
     report = format_report(result)
@@ -194,7 +197,8 @@ def main():
 
     if args.html:
         from screener.web import build_site, render_rrg_data_uri
-        uri = render_rrg_data_uri(start, end, interval, cache_dir=config.cache_dir)
+        uri = render_rrg_data_uri(start, end, interval, cache_dir=config.cache_dir,
+                                  market=mkt.key)
         page = build_site(result, uri)
         Path(args.html).parent.mkdir(parents=True, exist_ok=True)
         Path(args.html).write_text(page, encoding="utf-8")
