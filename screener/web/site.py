@@ -120,6 +120,36 @@ const COLUMNS = {_json_for_html(columns)};
 """
 
 
+_FACTOR_INFO = {
+    "sector": ("Sector tailwind", "the stock's sector is Leading or Improving on the RRG"),
+    "trend": ("Trend", "positive 3M / 6M / 12M returns and price above its 50 & 200-day averages"),
+    "rel_strength": ("Relative strength", "beating its own sector over the last 3 months"),
+    "volatility": ("Volatility fit", "daily moves lively enough to trade, not chaotic"),
+    "trigger": ("Trigger", "a fresh catalyst today — 52-week-high breakout, 2×+ volume, MACD cross, or a big up-day"),
+    "fundamental": ("Fundamental", "value + quality + growth from the fundamentals snapshot"),
+}
+
+
+def conviction_methodology_html(currency: str = "$") -> str:
+    """Explain the Daily Conviction Score, generated from the live weights/gates."""
+    from screener.scoring import DEFAULT_WEIGHTS, Gates
+    g = Gates()
+    rows = "".join(
+        f"<li><b>{_FACTOR_INFO[k][0]}</b> · {round(DEFAULT_WEIGHTS[k] * 100)}% — {_FACTOR_INFO[k][1]}</li>"
+        for k in DEFAULT_WEIGHTS if k in _FACTOR_INFO
+    )
+    return (
+        '<details class="method"><summary>ℹ︎ How the Conviction Score works</summary>'
+        "<p>Each stock gets a <b>0–100 Daily Conviction Score</b> — a weighted blend of six "
+        "factors (higher = stronger confluence), behind hard gates:</p>"
+        f"<ul>{rows}</ul>"
+        f'<p class="muted">Gates (excluded if failed): price ≥ {currency}{g.min_price:.0f} and '
+        f"≥ {currency}{g.min_dollar_vol / 1e6:.0f}M average daily turnover; drop negative or "
+        f"&gt;{g.max_pe:.0f} P/E and debt/equity &gt; {g.max_debt_equity:.1f}. "
+        "Missing fundamentals leave that factor neutral.</p></details>"
+    )
+
+
 def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
     """Inner content for the daily technical screener site (market-aware)."""
     rows, screen_meta = _payload(result)
@@ -150,6 +180,7 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
     <div class="tile"><div class="k">{len(result.get("leading_sectors", []))}</div><div class="l">Tailwind sectors</div></div>
   </div>
   <div class="chips"><b style="color:var(--muted)">SECTOR TAILWINDS&nbsp;&nbsp;</b>{chips}</div>
+  {conviction_methodology_html(currency)}
   {rrg_block}"""
     return render_screener_body(header, rows, screen_meta, COLUMNS, currency=currency)
 

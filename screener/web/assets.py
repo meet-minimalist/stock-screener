@@ -38,6 +38,12 @@ STYLE = """
 details.rrg { margin:0 0 20px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
 details.rrg > summary { cursor:pointer; padding:12px 16px; font-weight:600; }
 details.rrg img { display:block; width:100%; height:auto; border-radius:0 0 12px 12px; }
+details.method { margin:0 0 18px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+details.method > summary { cursor:pointer; padding:11px 16px; font-weight:600; font-size:.9rem; }
+details.method p { margin:0 16px 10px; color:var(--ink2); font-size:.86rem; }
+details.method ul { margin:0 16px 10px; padding-left:20px; color:var(--ink2); font-size:.86rem; }
+details.method li { margin:3px 0; }
+details.method li b { color:var(--ink); }
 
 .tabs { display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); margin-bottom:14px; }
 .tab { appearance:none; background:none; border:0; border-bottom:2px solid transparent; color:var(--ink2);

@@ -114,6 +114,31 @@ def build_rows(funds: dict) -> tuple[list[dict], list[dict]]:
     return rows, screen_meta
 
 
+_DIM_INFO = {
+    "value": ("Value", "cheaper on P/E, forward P/E, PEG, P/S, P/B, P/FCF"),
+    "quality": ("Quality", "returns on capital (ROE, ROA, ROCE) and profit margins"),
+    "growth": ("Growth", "forward and trailing EPS & sales growth"),
+    "health": ("Financial health", "low debt (Debt/Eq, LT Debt/Eq) with healthy current & quick ratios"),
+}
+
+
+def _grade_methodology() -> str:
+    """Explain the A–F grade, generated from the live dimension weights."""
+    from screener.fundamentals.grade import DIMENSION_WEIGHTS
+    rows = "".join(
+        f"<li><b>{_DIM_INFO[k][0]}</b> · {round(DIMENSION_WEIGHTS[k] * 100)}% — {_DIM_INFO[k][1]}</li>"
+        for k in DIMENSION_WEIGHTS if k in _DIM_INFO
+    )
+    return (
+        '<details class="method"><summary>ℹ︎ How the grade works</summary>'
+        "<p>Each stock is graded <b>A–F</b> (0–100) — a weighted blend of four dimensions "
+        "(dividend yield is shown but not scored):</p>"
+        f"<ul>{rows}</ul>"
+        '<p class="muted">Letter: A ≥ 80 · B ≥ 68 · C ≥ 56 · D ≥ 44 · else F. '
+        "Each dimension uses whatever metrics are available; missing ones stay neutral.</p></details>"
+    )
+
+
 def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
     from screener.markets import get_market
     mkt = get_market(market)
@@ -131,7 +156,8 @@ def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
     <div class="tile"><div class="k">{grades['A']}</div><div class="l">A-grade</div></div>
     <div class="tile"><div class="k">{best:.0f}</div><div class="l">Best overall</div></div>
     <div class="tile"><div class="k">{len(screen_meta)}</div><div class="l">Screens</div></div>
-  </div>"""
+  </div>
+  {_grade_methodology()}"""
     return render_screener_body(header, rows, screen_meta, COLUMNS,
                                 score_label="Min grade", currency=mkt.currency)
 
