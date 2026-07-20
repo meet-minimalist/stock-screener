@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import statistics
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -53,6 +54,9 @@ COLUMNS = [
      "desc": "P/E divided by earnings growth — around 1 is fairly priced (India: P/E ÷ EPS CAGR)."},
     {"key": "ps", "label": "P/S", "type": "num", "dp": 1,
      "desc": "Price-to-sales ratio (market cap ÷ revenue)."},
+    {"key": "rel_ps", "label": "P/S vs Sec", "type": "num", "dp": 2,
+     "desc": "This stock's P/S ÷ its sector's median P/S — below 1.0 means cheaper "
+             "than its sector peers. Powers the Cheap vs Peers screen."},
     {"key": "roe", "label": "ROE", "type": "pct",
      "desc": "Return on equity — net profit as a % of shareholder equity."},
     {"key": "roa", "label": "ROA", "type": "pct",
@@ -96,6 +100,17 @@ def _present_columns(rows: list[dict], columns: list[dict]) -> list[dict]:
     return [c for c in columns if c["key"] in keep]
 
 
+# "Cheap vs Peers" thresholds — a sector-relative value screen (see build_rows).
+# We benchmark P/S against the stock's *sector* median (screener.in gives no fine
+# industry) and gate leverage with Debt/Equity (screener.in exposes no cash, so a
+# true EV/Sales can't be built). Faithful to the pseudocode's intent otherwise.
+_MIN_SECTOR_PEERS = 4      # need a few names before a sector median P/S is trustworthy
+_MAX_REL_PS = 1.5          # keep names trading up to 1.5x their sector's median P/S
+_MIN_NET_MARGIN = 2.0      # skip barely/unprofitable businesses (the 2% floor)
+_MIN_PS = 0.2              # value-trap floor — a near-zero P/S prices in collapse
+_MAX_DE = 1.5              # leverage gate standing in for the EV/Sales debt check
+
+
 @dataclass(frozen=True)
 class FScreen:
     key: str
@@ -103,6 +118,7 @@ class FScreen:
     description: str
     predicate: Callable[[dict], bool]
     sort_by: str = "score"
+    sort_desc: bool = True     # False ranks ascending (e.g. cheapest P/S first)
 
 
 SCREENS: list[FScreen] = [
@@ -123,6 +139,14 @@ SCREENS: list[FScreen] = [
     FScreen("garp", "Growth at a Reasonable Price",
             "Solid growth without paying up for it.",
             lambda r: _n(r["growth"]) >= 60 and _n(r["value"]) >= 55),
+    FScreen("cheap_vs_peers", "Cheap vs Peers",
+            "Trading below ~1.5x its sector's median P/S, with real margins (≥2%), no "
+            "value-trap P/S and sane leverage — ranked cheapest relative to peers first.",
+            lambda r: (isinstance(r.get("rel_ps"), (int, float)) and r["rel_ps"] <= _MAX_REL_PS
+                       and _n(r.get("net_margin")) >= _MIN_NET_MARGIN
+                       and isinstance(r.get("ps"), (int, float)) and r["ps"] >= _MIN_PS
+                       and (r.get("debt_equity") is None or r["debt_equity"] <= _MAX_DE)),
+            sort_by="rel_ps", sort_desc=False),
     FScreen("dividend", "Dividend Payers",
             "Meaningful dividend yield.",
             lambda r: _n(r["dividend_yield"]) >= 2, "dividend_yield"),
@@ -146,14 +170,27 @@ def build_rows(funds: dict) -> tuple[list[dict], list[dict]]:
         row.update({m: getattr(f, m) for m in _ROW_METRICS})
         rows.append(row)
 
+    # Sector-relative valuation: each stock's P/S over its sector's median P/S
+    # (needs a few peers to be meaningful). Below 1.0 = cheaper than its sector.
+    by_sector: dict[str, list[float]] = {}
+    for r in rows:
+        if isinstance(r.get("ps"), (int, float)) and r["ps"] > 0 and r.get("sector"):
+            by_sector.setdefault(r["sector"], []).append(r["ps"])
+    median_ps = {s: statistics.median(v) for s, v in by_sector.items()
+                 if len(v) >= _MIN_SECTOR_PEERS}
+    for r in rows:
+        med = median_ps.get(r.get("sector"))
+        r["rel_ps"] = (r["ps"] / med) if (med and isinstance(r.get("ps"), (int, float))
+                                          and r["ps"] > 0) else None
+
     membership: dict[str, set] = {}
     screen_meta: list[dict] = []
     for s in SCREENS:
         hits = sorted((r for r in rows if s.predicate(r)),
-                      key=lambda r: _n(r[s.sort_by]), reverse=True)
+                      key=lambda r: _n(r[s.sort_by]), reverse=s.sort_desc)
         membership[s.key] = {r["ticker"] for r in hits}
         screen_meta.append({"key": s.key, "name": s.name, "description": s.description,
-                            "sort_by": s.sort_by, "sort_desc": True, "count": len(hits)})
+                            "sort_by": s.sort_by, "sort_desc": s.sort_desc, "count": len(hits)})
     for r in rows:
         r["screens"] = [k for k, tickers in membership.items() if r["ticker"] in tickers]
     return rows, screen_meta
