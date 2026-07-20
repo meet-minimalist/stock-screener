@@ -41,3 +41,30 @@ def test_missing_dimensions_use_available():
 def test_all_missing_is_ungraded():
     g = grade(_f())
     assert g.overall is None and g.letter == "—"
+
+
+def test_thin_quality_not_scored_from_single_metric():
+    # A high promoter holding alone (or a lone ROE) must not mint a quality score —
+    # otherwise thin-data India names float to the top of the High Quality screen.
+    assert grade(_f(promoter_holding=75)).quality is None
+    assert grade(_f(roe=30)).quality is None
+
+
+def test_promoter_holding_is_a_light_tilt_not_a_pillar():
+    # With real profitability present, promoter holding nudges quality up but doesn't
+    # dominate it (15% weight).
+    base = grade(_f(roe=20, net_margin=15))
+    tilted = grade(_f(roe=20, net_margin=15, promoter_holding=75))
+    assert base.quality is not None and tilted.quality is not None
+    assert tilted.quality > base.quality
+    assert tilted.quality - base.quality < 15   # bounded tilt, not an equal pillar
+
+
+def test_india_shaped_record_still_grades():
+    # roe/roa/roi/oper/net + ps/peg/pb + growth + debt/equity → full grade.
+    g = grade(_f(pe=18, ps=3, pb=2.5, peg=1.5,
+                 roe=18, roa=9, roi=16, oper_margin=20, net_margin=12,
+                 eps_growth=15, eps_growth_5y=14, sales_growth=12, debt_equity=0.6,
+                 promoter_holding=60))
+    assert g.value is not None and g.quality is not None
+    assert g.growth is not None and g.health is not None and g.overall is not None

@@ -35,24 +35,32 @@ def _inv(v: float | None, lo: float, hi: float) -> float | None:
     return None if r is None else 1.0 - r
 
 
-def _avg(*scores: float | None) -> float | None:
+def _avg(*scores: float | None, min_present: int = 1) -> float | None:
+    """Mean of the present scores, or None if fewer than ``min_present`` exist."""
     present = [s for s in scores if s is not None]
-    return sum(present) / len(present) if present else None
+    return sum(present) / len(present) if len(present) >= min_present else None
 
 
 def _value(f: Fundamentals) -> float | None:
     pe = 0.0 if (f.pe is not None and f.pe < 0) else _inv(f.pe, 10, 40)
     fpe = 0.0 if (f.forward_pe is not None and f.forward_pe < 0) else _inv(f.forward_pe, 10, 35)
+    # Need ≥2 valuation metrics so a lone P/E can't mint a value score.
     return _avg(pe, fpe, _inv(f.peg, 0.5, 3.0), _inv(f.ps, 1, 10),
-                _inv(f.pb, 1, 8), _inv(f.pfcf, 10, 40))
+                _inv(f.pb, 1, 8), _inv(f.pfcf, 10, 40), min_present=2)
 
 
 def _quality(f: Fundamentals) -> float | None:
-    # promoter_holding is an India governance signal (skin in the game); None for
-    # US, so it simply doesn't contribute there.
-    return _avg(_ramp(f.roe, 0, 25), _ramp(f.roa, 0, 12), _ramp(f.roi, 0, 20),
+    # Require ≥2 substantive profitability metrics so thin-data names (e.g. only
+    # ROE, or only promoter holding) don't earn a full quality score.
+    base = _avg(_ramp(f.roe, 0, 25), _ramp(f.roa, 0, 12), _ramp(f.roi, 0, 20),
                 _ramp(f.gross_margin, 0, 60), _ramp(f.oper_margin, 0, 25),
-                _ramp(f.net_margin, 0, 20), _ramp(f.promoter_holding, 25, 55))
+                _ramp(f.net_margin, 0, 20), min_present=2)
+    if base is None:
+        return None
+    # promoter_holding is an India governance signal (skin in the game) — a light
+    # tilt on top of real profitability, not an equal pillar. None for US → no-op.
+    prom = _ramp(f.promoter_holding, 25, 55)
+    return base if prom is None else 0.85 * base + 0.15 * prom
 
 
 def _growth(f: Fundamentals) -> float | None:

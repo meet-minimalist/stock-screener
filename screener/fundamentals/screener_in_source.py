@@ -50,16 +50,21 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
     tr = company.top_ratios
     price = _num(tr.get("Current Price"))
     book = _num(tr.get("Book Value"))
+    market_cap = _num(tr.get("Market Cap"))
+    pe = _num(tr.get("Stock P/E"))
 
     net_margin = oper_margin = eps_growth = eps_growth_5y = sales_growth = debt_equity = None
+    net_profit = sales = total_assets = None
     try:
         pl = company.profit_loss
         if "OPM %" in pl.index:
             oper_margin = _last(pl.loc["OPM %"])
-        if "Net Profit" in pl.index and "Sales" in pl.index:
-            np_, sales = _last(pl.loc["Net Profit"]), _last(pl.loc["Sales"])
-            if np_ is not None and sales:
-                net_margin = np_ / sales * 100.0
+        if "Net Profit" in pl.index:
+            net_profit = _last(pl.loc["Net Profit"])
+        if "Sales" in pl.index:
+            sales = _last(pl.loc["Sales"])
+        if net_profit is not None and sales:
+            net_margin = net_profit / sales * 100.0
         # Multi-year CAGR from the full P&L — sturdier than a 2-year YoY.
         if "EPS in Rs" in pl.index:
             eps_growth = _cagr(pl.loc["EPS in Rs"], 3)
@@ -79,6 +84,7 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
     try:
         bs = company.balance_sheet
         borrow = _last(bs.loc["Borrowings"]) if "Borrowings" in bs.index else None
+        total_assets = _last(bs.loc["Total Assets"]) if "Total Assets" in bs.index else None
         equity = sum(v for v in (
             _last(bs.loc["Equity Capital"]) if "Equity Capital" in bs.index else None,
             _last(bs.loc["Reserves"]) if "Reserves" in bs.index else None,
@@ -88,12 +94,20 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
     except Exception as exc:
         logger.debug("balance_sheet parse failed for %s: %s", symbol, exc)
 
+    # Metrics screener.in doesn't report but we can derive from the same page:
+    # P/S (mkt cap ÷ sales), PEG (P/E ÷ EPS CAGR), ROA (net profit ÷ total assets).
+    ps = (market_cap / sales) if (market_cap and sales and sales > 0) else None
+    peg = (pe / eps_growth) if (pe and eps_growth and eps_growth > 0) else None
+    roa = (net_profit / total_assets * 100.0) if (net_profit is not None and total_assets) else None
+
     return Fundamentals(
         ticker=symbol, as_of=as_of, sector=sector,
-        market_cap=_num(tr.get("Market Cap")),
-        pe=_num(tr.get("Stock P/E")),
+        market_cap=market_cap,
+        pe=pe,
+        ps=ps, peg=peg,
         pb=(price / book) if (price and book) else None,
         roe=_num(tr.get("ROE")),
+        roa=roa,
         roi=_num(tr.get("ROCE")),          # screener.in reports ROCE
         dividend_yield=_num(tr.get("Dividend Yield")),
         net_margin=net_margin, oper_margin=oper_margin,

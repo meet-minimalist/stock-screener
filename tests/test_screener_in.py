@@ -29,8 +29,8 @@ def _company():
         index=["Sales", "OPM %", "Net Profit", "EPS in Rs"], columns=yrs,
     ).astype(float)
     bs = pd.DataFrame(
-        {"Mar 2025": [10.0, 490.0, 250.0], "Mar 2026": [10.0, 590.0, 300.0]},
-        index=["Equity Capital", "Reserves", "Borrowings"],
+        {"Mar 2025": [10.0, 490.0, 250.0, 900.0], "Mar 2026": [10.0, 590.0, 300.0, 1000.0]},
+        index=["Equity Capital", "Reserves", "Borrowings", "Total Assets"],
     )
     sh = pd.DataFrame({"Mar 2026": [55.2, 18.0, 15.0]}, index=["Promoters", "FIIs", "DIIs"])
     top = {"Market Cap": 50000.0, "Stock P/E": 20.0, "Current Price": 200.0,
@@ -51,6 +51,10 @@ def test_maps_top_ratios_promoter_and_cagr():
     assert f.sales_growth == _cagr(co.profit_loss.loc["Sales"], 3)
     assert f.eps_growth is not None and f.eps_growth != _yoy(co.profit_loss.loc["EPS in Rs"])
     assert f.promoter_holding == 55.2
+    # Derived metrics screener.in doesn't report directly.
+    assert f.ps == 50000.0 / 1200.0                  # market cap ÷ sales
+    assert f.roa == 160.0 / 1000.0 * 100.0           # net profit ÷ total assets
+    assert f.peg == 20.0 / f.eps_growth              # P/E ÷ EPS CAGR
 
 
 def test_cagr_needs_enough_positive_periods():
@@ -67,3 +71,5 @@ def test_missing_sections_stay_none():
     f = _to_fundamentals(bank, "BANKX", "2026-07-16", sector="Financial Services")
     assert f.pe == 16.0 and f.roe == 14.0
     assert f.net_margin is None and f.sales_growth is None and f.promoter_holding is None
+    # No statements → derived metrics can't be computed either.
+    assert f.ps is None and f.peg is None and f.roa is None

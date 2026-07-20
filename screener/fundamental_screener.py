@@ -52,6 +52,22 @@ def _n(v) -> float:
     return v if isinstance(v, (int, float)) else float("-inf")
 
 
+# Columns that always render (identity + the four grade dimensions + sector), even
+# if a given market never populates them. Every other column is shown only when at
+# least one row has a value — so a source that can't supply a metric (e.g.
+# screener.in has no forward P/E) doesn't leave a permanently-dead column.
+_ALWAYS = {"rank", "ticker", "letter", "score", "value", "quality", "growth",
+           "health", "sector"}
+
+
+def _present_columns(rows: list[dict], columns: list[dict]) -> list[dict]:
+    keep = {c["key"] for c in columns if c["key"] in _ALWAYS}
+    for c in columns:
+        if c["key"] not in keep and any(r.get(c["key"]) is not None for r in rows):
+            keep.add(c["key"])
+    return [c for c in columns if c["key"] in keep]
+
+
 @dataclass(frozen=True)
 class FScreen:
     key: str
@@ -159,7 +175,8 @@ def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
     <div class="tile"><div class="k">{len(screen_meta)}</div><div class="l">Screens</div></div>
   </div>
   {_grade_methodology()}"""
-    return render_screener_body(header, rows, screen_meta, COLUMNS,
+    cols = _present_columns(rows, COLUMNS)
+    return render_screener_body(header, rows, screen_meta, cols,
                                 score_label="Min grade", currency=mkt.currency)
 
 
