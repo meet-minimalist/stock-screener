@@ -71,9 +71,15 @@ th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line2
 th { position:sticky; top:0; background:var(--card); color:var(--muted); font-weight:600; font-size:.7rem;
   text-transform:uppercase; letter-spacing:.03em; cursor:pointer; user-select:none; }
 th.left, td.left { text-align:left; }
+th.has-desc { cursor:help; border-bottom:1px dotted var(--muted); }
+th.has-desc[aria-sort] { cursor:pointer; }
 th[aria-sort="ascending"]::after { content:" \\2191"; color:var(--accent); }
 th[aria-sort="descending"]::after { content:" \\2193"; color:var(--accent); }
 td.num { font-variant-numeric:tabular-nums; }
+.tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.72rem; font-weight:600;
+  border:1px solid var(--line); color:var(--ink2); background:var(--line2); }
+.tag.t-mega, .tag.t-large { color:var(--accent); border-color:var(--chip-line); background:var(--chip-bg); }
+.tag.t-mid { color:#b07400; border-color:rgba(176,116,0,.35); background:rgba(176,116,0,.12); }
 tbody tr:hover { background:var(--line2); }
 .rank { color:var(--muted); }
 .tk { font-weight:650; }
@@ -112,6 +118,17 @@ SCRIPT = r"""
       case "pct": return (typeof v === "number") ? v.toFixed(0) + "%" : v;
       case "ret": { var c = v > 0 ? "pos" : v < 0 ? "neg" : "muted"; return '<span class="' + c + '">' + (v>0?"+":"") + v.toFixed(0) + "%</span>"; }
       case "money": return (typeof CURRENCY === "undefined" ? "$" : CURRENCY) + Number(v).toLocaleString(undefined, {maximumFractionDigits:2});
+      case "mcap": {
+        if (typeof v !== "number") return "–";
+        var cur = (typeof CURRENCY === "undefined" ? "$" : CURRENCY);
+        if (cur === "₹") return "₹" + Math.round(v).toLocaleString("en-IN") + " Cr";
+        var a = Math.abs(v);
+        if (a >= 1e12) return "$" + (v/1e12).toFixed(2) + "T";
+        if (a >= 1e9)  return "$" + (v/1e9).toFixed(2) + "B";
+        if (a >= 1e6)  return "$" + (v/1e6).toFixed(0) + "M";
+        return "$" + Math.round(v).toLocaleString();
+      }
+      case "tag": return '<span class="tag t-' + String(v).toLowerCase() + '">' + v + "</span>";
       case "num": return (typeof v === "number") ? v.toFixed(col.dp==null?1:col.dp) : v;
       case "factors": {
         var out = '<span class="fbars">', keys = ["sector","trend","rel_strength","volatility","trigger","fundamental"];
@@ -155,7 +172,8 @@ SCRIPT = r"""
     for (var i=0;i<COLUMNS.length;i++){ var c=COLUMNS[i];
       var sortKey = state.sortKey || sc.sort_by, dir = state.sortKey ? state.sortDir : (sc.sort_desc?-1:1);
       var aria = (c.key===sortKey && c.sortable!==false) ? (dir===1?"ascending":"descending") : "none";
-      head += '<th class="'+(c.align==="left"?"left":"num")+'" data-key="'+c.key+'" aria-sort="'+aria+'">'+c.label+"</th>"; }
+      var titleAttr = c.desc ? ' title="'+String(c.desc).replace(/"/g,"&quot;")+'"' : '';
+      head += '<th'+titleAttr+' class="'+(c.align==="left"?"left":"num")+(c.desc?" has-desc":"")+'" data-key="'+c.key+'" aria-sort="'+aria+'">'+c.label+"</th>"; }
     head += "</tr>";
 
     var body = "";

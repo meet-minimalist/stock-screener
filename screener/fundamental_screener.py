@@ -23,28 +23,56 @@ logger = logging.getLogger(__name__)
 # Dense, ChartMill-style column set. "score" cells render as 0-100 rating badges.
 COLUMNS = [
     {"key": "rank", "label": "#", "type": "num", "sortable": False},
-    {"key": "ticker", "label": "Ticker", "type": "text", "align": "left"},
-    {"key": "letter", "label": "Grade", "type": "text"},
-    {"key": "score", "label": "Overall", "type": "score"},
-    {"key": "value", "label": "Value", "type": "score"},
-    {"key": "quality", "label": "Quality", "type": "score"},
-    {"key": "growth", "label": "Growth", "type": "score"},
-    {"key": "health", "label": "Health", "type": "score"},
-    {"key": "dividend_yield", "label": "Yield", "type": "pct"},
-    {"key": "pe", "label": "P/E", "type": "num", "dp": 1},
-    {"key": "forward_pe", "label": "Fwd P/E", "type": "num", "dp": 1},
-    {"key": "peg", "label": "PEG", "type": "num", "dp": 2},
-    {"key": "ps", "label": "P/S", "type": "num", "dp": 1},
-    {"key": "roe", "label": "ROE", "type": "pct"},
-    {"key": "roa", "label": "ROA", "type": "pct"},
-    {"key": "net_margin", "label": "Net M", "type": "pct"},
-    {"key": "eps_growth", "label": "EPS gr", "type": "pct"},
-    {"key": "sales_growth", "label": "Sales gr", "type": "pct"},
-    {"key": "debt_equity", "label": "D/E", "type": "num", "dp": 2},
-    {"key": "current_ratio", "label": "Curr R", "type": "num", "dp": 2},
-    {"key": "promoter_holding", "label": "Prom %", "type": "pct"},
-    {"key": "sector", "label": "Sector", "type": "text", "align": "left"},
-    {"key": "industry", "label": "Industry", "type": "text", "align": "left"},
+    {"key": "ticker", "label": "Ticker", "type": "text", "align": "left",
+     "desc": "Stock symbol."},
+    {"key": "market_cap", "label": "Mkt Cap", "type": "mcap",
+     "desc": "Market capitalisation (US in $, India in ₹ crore)."},
+    {"key": "cap_tier", "label": "Segment", "type": "tag", "align": "left",
+     "desc": "Size segment by market cap — US: Mega ≥$200B, Large ≥$10B, Mid ≥$2B, "
+             "Small ≥$300M, else Micro. India (SEBI rank-based): top 100 by market "
+             "cap are Large, the next 150 Mid, the rest Small."},
+    {"key": "letter", "label": "Grade", "type": "text",
+     "desc": "Overall letter grade A–F from the blended score."},
+    {"key": "score", "label": "Overall", "type": "score",
+     "desc": "0–100 overall fundamental score: weighted blend of Value, Quality, Growth, Health."},
+    {"key": "value", "label": "Value", "type": "score",
+     "desc": "Valuation score (0–100) — cheaper on P/E, PEG, P/S, P/B, P/FCF scores higher."},
+    {"key": "quality", "label": "Quality", "type": "score",
+     "desc": "Profitability score (0–100) — higher ROE, ROA, ROCE and margins score higher."},
+    {"key": "growth", "label": "Growth", "type": "score",
+     "desc": "Growth score (0–100) — faster EPS and sales growth scores higher."},
+    {"key": "health", "label": "Health", "type": "score",
+     "desc": "Balance-sheet score (0–100) — lower debt and healthier liquidity score higher."},
+    {"key": "dividend_yield", "label": "Yield", "type": "pct",
+     "desc": "Trailing dividend yield (shown, not scored)."},
+    {"key": "pe", "label": "P/E", "type": "num", "dp": 1,
+     "desc": "Price-to-earnings ratio (lower = cheaper)."},
+    {"key": "forward_pe", "label": "Fwd P/E", "type": "num", "dp": 1,
+     "desc": "Forward price-to-earnings ratio (next-year estimate)."},
+    {"key": "peg", "label": "PEG", "type": "num", "dp": 2,
+     "desc": "P/E divided by earnings growth — around 1 is fairly priced (India: P/E ÷ EPS CAGR)."},
+    {"key": "ps", "label": "P/S", "type": "num", "dp": 1,
+     "desc": "Price-to-sales ratio (market cap ÷ revenue)."},
+    {"key": "roe", "label": "ROE", "type": "pct",
+     "desc": "Return on equity — net profit as a % of shareholder equity."},
+    {"key": "roa", "label": "ROA", "type": "pct",
+     "desc": "Return on assets — net profit as a % of total assets."},
+    {"key": "net_margin", "label": "Net M", "type": "pct",
+     "desc": "Net profit margin — net profit as a % of revenue."},
+    {"key": "eps_growth", "label": "EPS gr", "type": "pct",
+     "desc": "Earnings-per-share growth (India: 3-year CAGR)."},
+    {"key": "sales_growth", "label": "Sales gr", "type": "pct",
+     "desc": "Revenue growth (India: 3-year CAGR)."},
+    {"key": "debt_equity", "label": "D/E", "type": "num", "dp": 2,
+     "desc": "Debt-to-equity ratio (lower = less leveraged)."},
+    {"key": "current_ratio", "label": "Curr R", "type": "num", "dp": 2,
+     "desc": "Current ratio — current assets ÷ current liabilities (≥1 is healthier)."},
+    {"key": "promoter_holding", "label": "Prom %", "type": "pct",
+     "desc": "Promoter (founder/parent) shareholding — India governance signal."},
+    {"key": "sector", "label": "Sector", "type": "text", "align": "left",
+     "desc": "Sector classification."},
+    {"key": "industry", "label": "Industry", "type": "text", "align": "left",
+     "desc": "Industry classification."},
 ]
 
 
@@ -157,9 +185,13 @@ def _grade_methodology() -> str:
 
 
 def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
-    from screener.markets import get_market
+    from screener.markets import cap_classifier, get_market
     mkt = get_market(market)
     rows, screen_meta = build_rows(funds)
+    # Rank India by the whole universe's caps (not just graded rows) so segments match SEBI.
+    classify = cap_classifier(mkt, [getattr(f, "market_cap", None) for f in funds.values()])
+    for r in rows:
+        r["cap_tier"] = classify(r.get("market_cap"))
     grades = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
     for r in rows:
         grades[r["letter"]] = grades.get(r["letter"], 0) + 1
