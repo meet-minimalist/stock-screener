@@ -40,6 +40,19 @@ def _cagr(row, years: int) -> float | None:
     return None
 
 
+def _usable(company) -> bool:
+    """Whether a company page carries parseable ratios.
+
+    Standalone-only filers (most small caps) render an *empty* ``/consolidated/``
+    page — Market Cap comes back as a bare ``₹ Cr.`` with no number — so a blank
+    Market Cap is the signal to retry the standalone page.
+    """
+    try:
+        return _num(company.top_ratios.get("Market Cap")) is not None
+    except Exception:  # noqa: BLE001 - a broken page is simply "not usable"
+        return False
+
+
 def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fundamentals:
     """Map a screener.in Company (top_ratios + statements) to the shared schema.
 
@@ -117,13 +130,17 @@ def _to_fundamentals(company, symbol: str, as_of: str, sector: str | None) -> Fu
     )
 
 
-def fetch(tickers, sectors: dict | None = None, sleep_sec: float | None = None,
-          **kwargs) -> dict[str, Fundamentals]:
+def fetch(tickers, sectors: dict | None = None, aliases: dict | None = None,
+          sleep_sec: float | None = None, **kwargs) -> dict[str, Fundamentals]:
     """Fetch India fundamentals for a symbol list via the private screener.in module.
 
     One request per company (throttled by the client); optional login via the
     ``SCREENER_EMAIL`` / ``SCREENER_PASSWORD`` env vars unlocks longer history.
     Failures on individual names are logged and skipped.
+
+    ``aliases`` maps a record ticker to the slug screener.in resolves it by, for
+    names whose display symbol isn't their page URL (e.g. BSE-exclusive companies,
+    which resolve by numeric scrip code but are recorded under their readable ticker).
     """
     from screener_fetcher import ScreenerClient
     from screener_fetcher.exceptions import ScreenerError
@@ -138,10 +155,14 @@ def fetch(tickers, sectors: dict | None = None, sleep_sec: float | None = None,
 
     as_of = _dt.date.today().isoformat()
     sectors = sectors or {}
+    aliases = aliases or {}
     out: dict[str, Fundamentals] = {}
     for symbol in tickers:
         try:
-            company = client.company(symbol)
+            slug = aliases.get(symbol, symbol)
+            company = client.company(slug)
+            if not _usable(company):
+                company = client.company(slug, consolidated=False)  # standalone fallback
             out[symbol] = _to_fundamentals(company, symbol, as_of, sectors.get(symbol))
         except ScreenerError as exc:
             logger.warning("screener.in fetch failed for %s: %s", symbol, exc)

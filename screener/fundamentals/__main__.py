@@ -24,6 +24,8 @@ def main() -> None:
                         help="Ticker universe (defaults to the market's own, e.g. sp1500 / nifty_total)")
     parser.add_argument("--chunk-size", type=int, default=100,
                         help="Tickers per finviz query (US, keeps the URL short)")
+    parser.add_argument("--no-bse", action="store_true",
+                        help="India only: skip the BSE-exclusive names (NSE universe only)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -42,7 +44,18 @@ def main() -> None:
     else:
         # Attach the NSE Industry so India records carry a sector for the screener.
         con = load_constituents(market=mkt.key)
-        kwargs["sectors"] = dict(zip(con["Symbol"], con["sector"]))
+        sectors = dict(zip(con["Symbol"], con["sector"]))
+        # Fold in BSE-exclusive names (recorded by readable ticker, fetched by
+        # numeric scrip code via the alias map). Cached; see screener.data.bse.
+        if not args.no_bse:
+            from screener.data.bse import india_extra_universe
+            bse_tickers, aliases, bse_sectors = india_extra_universe()
+            if bse_tickers:
+                tickers = list(tickers) + bse_tickers
+                sectors.update(bse_sectors)
+                kwargs["aliases"] = aliases
+                print(f"Added {len(bse_tickers)} BSE-exclusive names to the India universe")
+        kwargs["sectors"] = sectors
 
     funds = refresh_market(mkt.key, **kwargs)
     print(f"Refreshed {len(funds)} {mkt.label} fundamentals -> data/fundamentals/{mkt.key}/")

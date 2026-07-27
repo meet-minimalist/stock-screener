@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import pandas as pd
 
-from screener.fundamentals.screener_in_source import _cagr, _to_fundamentals, _yoy
+from screener.fundamentals import screener_in_source
+from screener.fundamentals.screener_in_source import _cagr, _to_fundamentals, _usable, _yoy
 
 
 class _FakeCompany:
@@ -73,3 +77,56 @@ def test_missing_sections_stay_none():
     assert f.net_margin is None and f.sales_growth is None and f.promoter_holding is None
     # No statements → derived metrics can't be computed either.
     assert f.ps is None and f.peg is None and f.roa is None
+
+
+def test_usable_flags_empty_consolidated_page():
+    # Standalone-only filers render an empty consolidated page: a bare "₹ Cr.".
+    empty = _FakeCompany({"Market Cap": "₹ Cr."}, pd.DataFrame(), pd.DataFrame())
+    good = _FakeCompany({"Market Cap": 1336.0}, pd.DataFrame(), pd.DataFrame())
+    assert _usable(good) is True
+    assert _usable(empty) is False
+
+
+class _FakeClient:
+    """Records every company(slug, consolidated) call and serves canned pages."""
+    def __init__(self, pages):
+        self._pages = pages
+        self.calls: list[tuple[str, bool]] = []
+
+    def company(self, slug, consolidated=True):
+        self.calls.append((slug, consolidated))
+        return self._pages[(slug, consolidated)]
+
+
+def _install_fake_client(monkeypatch, client):
+    module = types.ModuleType("screener_fetcher")
+    module.ScreenerClient = lambda *a, **k: client
+    exc = types.ModuleType("screener_fetcher.exceptions")
+    exc.ScreenerError = type("ScreenerError", (Exception,), {})
+    module.exceptions = exc
+    monkeypatch.setitem(sys.modules, "screener_fetcher", module)
+    monkeypatch.setitem(sys.modules, "screener_fetcher.exceptions", exc)
+
+
+def test_fetch_uses_alias_slug_but_records_display_ticker(monkeypatch):
+    # BSE-exclusive names resolve by numeric scrip code, keyed under their ticker.
+    page = _FakeCompany({"Market Cap": 16356.0, "Stock P/E": 43.1}, pd.DataFrame(), pd.DataFrame())
+    client = _FakeClient({("544467", True): page})
+    _install_fake_client(monkeypatch, client)
+
+    out = screener_in_source.fetch(["NSDL"], sectors={"NSDL": "Financials"},
+                                   aliases={"NSDL": "544467"})
+    assert client.calls == [("544467", True)]            # fetched by scrip code
+    assert set(out) == {"NSDL"}                           # recorded by display ticker
+    assert out["NSDL"].ticker == "NSDL" and out["NSDL"].market_cap == 16356.0
+
+
+def test_fetch_falls_back_to_standalone_when_consolidated_empty(monkeypatch):
+    empty = _FakeCompany({"Market Cap": "₹ Cr."}, pd.DataFrame(), pd.DataFrame())
+    standalone = _FakeCompany({"Market Cap": 1336.0, "Stock P/E": 18.5}, pd.DataFrame(), pd.DataFrame())
+    client = _FakeClient({("505036", True): empty, ("505036", False): standalone})
+    _install_fake_client(monkeypatch, client)
+
+    out = screener_in_source.fetch(["ACGL"], aliases={"ACGL": "505036"})
+    assert client.calls == [("505036", True), ("505036", False)]   # retried standalone
+    assert out["ACGL"].market_cap == 1336.0
