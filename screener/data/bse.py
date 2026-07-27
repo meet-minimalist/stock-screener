@@ -12,8 +12,8 @@ Approach (one network call per source, so it's cheap to refresh monthly):
    and market cap.
 2. **NSE** publishes its full equity list (``EQUITY_L.csv``) with ISINs.
 3. A stock is *BSE-exclusive* when its ISIN is on BSE but **not** on NSE. We keep
-   only the normal trading groups (A/B — dropping the illiquid X/XT, the SME
-   boards and the surveillance groups) and drop ETFs.
+   the mainboard equity groups (A/B/X/XT) above a market-cap floor — dropping the
+   SME boards, the surveillance/non-compliant groups, ETFs/funds and the penny tail.
 
 The result is written to ``data/tickers/bse_only.csv`` and reused until the next
 refresh. screener.in resolves these companies by their **numeric scrip code**
@@ -46,10 +46,13 @@ _HEADERS = {
                   "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
 }
 
-# Normal, deliverable-settled trading groups. A/B are the mainboard equity groups;
-# X/XT are illiquid, M*/IP are the SME platform, and T/TS/Z/ZP/Y/R are trade-to-trade
-# or surveillance. We keep only genuinely tradeable mainboard names by default.
-_DEFAULT_GROUPS = ("A", "B")
+# Mainboard equity groups. A/B are the liquid mainboard; X/XT are the same board's
+# lower-liquidity catch-all (where most legitimate small/microcaps sit). Excluded by
+# default: M*/IP (SME platform, thinner disclosure), T/TS (trade-to-trade
+# surveillance), Z/ZP (non-compliant) and P/Y/R (periodic/illiquid) — different-risk
+# segments, not just low liquidity. A market-cap floor then trims the penny tail.
+_DEFAULT_GROUPS = ("A", "B", "X", "XT")
+_MIN_MKTCAP = 100.0     # ₹ crore; drops sub-floor shells (and no-market-cap rows)
 
 # Columns of the cached BSE-only list.
 _COLUMNS = ["Symbol", "ScripCode", "Company Name", "Industry", "ISIN Code", "Group", "MktCap", "YF"]
@@ -104,11 +107,14 @@ def fetch_nse_isins(force_refresh: bool = False) -> set[str]:
 
 
 def _bse_only(bse: pd.DataFrame, nse_isins: set[str],
-              groups: tuple[str, ...] = _DEFAULT_GROUPS) -> pd.DataFrame:
+              groups: tuple[str, ...] = _DEFAULT_GROUPS,
+              min_mktcap: float = _MIN_MKTCAP) -> pd.DataFrame:
     """Pure diff/filter: BSE scrips whose ISIN is absent from NSE, mainboard only.
 
-    Keeps the requested trading ``groups``, drops ETFs and malformed ISINs, and
-    de-duplicates on ISIN then ``scrip_id`` (keeping the largest cap of a clash).
+    Keeps the requested trading ``groups`` at or above ``min_mktcap`` (₹ crore),
+    drops ETFs/funds and malformed ISINs, and de-duplicates on ISIN then
+    ``scrip_id`` (keeping the largest cap of a clash). A row with no market cap
+    fails the floor and is dropped.
     """
     df = bse.copy()
     df["ISIN_NUMBER"] = df["ISIN_NUMBER"].astype(str).str.strip().str.upper()
@@ -122,6 +128,7 @@ def _bse_only(bse: pd.DataFrame, nse_isins: set[str],
     df = df[df["ISIN_NUMBER"].str.fullmatch(r"INE[0-9A-Z]{9}")]
     df = df[df["scrip_id"].ne("") & df["scrip_id"].ne("NAN")]
     df = df[df["GROUP"].isin([g.upper() for g in groups])]
+    df = df[df["Mktcap"] >= min_mktcap]                          # trims the penny tail
     df = df[~df["ISIN_NUMBER"].isin(nse_isins)]                  # BSE-exclusive
     df = df[~df["Scrip_Name"].astype(str)
             .str.contains("ETF|FUND|Issue Price", case=False, na=False)]
@@ -144,9 +151,10 @@ def _bse_only(bse: pd.DataFrame, nse_isins: set[str],
 
 
 def refresh_bse_only(force_refresh: bool = False,
-                     groups: tuple[str, ...] = _DEFAULT_GROUPS) -> pd.DataFrame:
+                     groups: tuple[str, ...] = _DEFAULT_GROUPS,
+                     min_mktcap: float = _MIN_MKTCAP) -> pd.DataFrame:
     """Rebuild ``bse_only.csv`` from the live BSE + NSE sources and cache it."""
-    out = _bse_only(fetch_bse_scrips(), fetch_nse_isins(force_refresh), groups)
+    out = _bse_only(fetch_bse_scrips(), fetch_nse_isins(force_refresh), groups, min_mktcap)
     _ensure_dir()
     out.to_csv(BSE_ONLY_CACHE, index=False)
     logger.info("Wrote %d BSE-exclusive names to %s", len(out), BSE_ONLY_CACHE)
