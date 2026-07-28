@@ -51,7 +51,7 @@ def main() -> None:
             from screener.data.bse import india_extra_universe
             bse_tickers, aliases, bse_sectors = india_extra_universe()
             if bse_tickers:
-                tickers = list(tickers) + bse_tickers
+                kwargs["tickers"] = list(tickers) + bse_tickers
                 sectors.update(bse_sectors)
                 kwargs["aliases"] = aliases
                 print(f"Added {len(bse_tickers)} BSE-exclusive names to the India universe")

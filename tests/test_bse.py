@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pandas as pd
 
 from screener.data import bse
@@ -92,3 +94,49 @@ def test_india_extra_universe_maps_ticker_slug_and_sector(monkeypatch):
 def test_india_extra_universe_empty_when_no_list(monkeypatch):
     monkeypatch.setattr(bse, "load_bse_only", lambda: pd.DataFrame(columns=bse._COLUMNS))
     assert bse.india_extra_universe() == ([], {}, {})
+
+
+def test_main_merges_bse_tickers_into_the_india_fetch(monkeypatch):
+    """Regression: the BSE names must reach refresh_market, not just the log line."""
+    import screener.fundamentals.__main__ as entry
+
+    captured: dict = {}
+
+    def fake_refresh(market, **kwargs):
+        captured["market"] = market
+        captured.update(kwargs)
+        return {t: object() for t in kwargs["tickers"]}
+
+    monkeypatch.setattr(entry, "get_ticker_list", lambda *a, **k: ["RELIANCE", "TCS"])
+    monkeypatch.setattr(entry, "load_constituents", lambda market="us": pd.DataFrame(
+        {"Symbol": ["RELIANCE", "TCS"], "sector": ["Energy", "IT"]}))
+    monkeypatch.setattr(entry, "refresh_market", fake_refresh)
+    monkeypatch.setattr(bse, "india_extra_universe",
+                        lambda: (["NSDL"], {"NSDL": "544467"}, {"NSDL": None}))
+    monkeypatch.setattr(sys, "argv", ["prog", "--market", "in"])
+
+    entry.main()
+    assert captured["market"] == "in"
+    assert set(captured["tickers"]) == {"RELIANCE", "TCS", "NSDL"}   # BSE name included
+    assert captured["aliases"] == {"NSDL": "544467"}
+
+
+def test_main_no_bse_flag_keeps_nse_only(monkeypatch):
+    import screener.fundamentals.__main__ as entry
+
+    captured: dict = {}
+    monkeypatch.setattr(entry, "get_ticker_list", lambda *a, **k: ["RELIANCE", "TCS"])
+    monkeypatch.setattr(entry, "load_constituents", lambda market="us": pd.DataFrame(
+        {"Symbol": ["RELIANCE", "TCS"], "sector": ["Energy", "IT"]}))
+    monkeypatch.setattr(entry, "refresh_market",
+                        lambda market, **k: captured.update(k) or {t: 0 for t in k["tickers"]})
+
+    def _boom():
+        raise AssertionError("india_extra_universe must not be called with --no-bse")
+
+    monkeypatch.setattr(bse, "india_extra_universe", _boom)
+    monkeypatch.setattr(sys, "argv", ["prog", "--market", "in", "--no-bse"])
+
+    entry.main()
+    assert set(captured["tickers"]) == {"RELIANCE", "TCS"}
+    assert "aliases" not in captured
