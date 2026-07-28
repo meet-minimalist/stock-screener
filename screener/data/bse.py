@@ -197,6 +197,22 @@ def india_extra_universe() -> tuple[list[str], dict[str, str], dict[str, str | N
     return symbols, aliases, sectors
 
 
+def india_extra_price_universe() -> tuple[list[str], dict[str, str | None], dict[str, str]]:
+    """BSE-exclusive names for the price/technical pipeline.
+
+    Returns ``(tickers, sectors, price_symbols)`` where ``price_symbols`` maps each
+    record ticker to its yfinance symbol (``SCRIPID.BO``) for OHLCV lookups — the
+    BSE analogue of appending ``.NS`` for NSE names.
+    """
+    df = load_bse_only()
+    if df.empty:
+        return [], {}, {}
+    symbols = df["Symbol"].astype(str).tolist()
+    sectors = {sym: _clean_sector(ind) for sym, ind in zip(symbols, df["Industry"])}
+    price = dict(zip(symbols, df["YF"].astype(str)))
+    return symbols, sectors, price
+
+
 def main() -> None:
     import argparse
 

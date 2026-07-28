@@ -140,3 +140,46 @@ def test_main_no_bse_flag_keeps_nse_only(monkeypatch):
     entry.main()
     assert set(captured["tickers"]) == {"RELIANCE", "TCS"}
     assert "aliases" not in captured
+
+
+def test_india_extra_price_universe_uses_bo_symbols(monkeypatch):
+    frame = pd.DataFrame({
+        "Symbol": ["NSDL", "OMEGAIN"], "ScripCode": ["544467", "511644"],
+        "Company Name": ["NSDL Ltd", "Omega Interactive Technologies Ltd"],
+        "Industry": [None, None], "ISIN Code": ["INE192801020", "INE113B01037"],
+        "Group": ["A", "X"], "MktCap": [16356.0, 394.97], "YF": ["NSDL.BO", "OMEGAIN.BO"],
+    })
+    monkeypatch.setattr(bse, "load_bse_only", lambda: frame)
+    tickers, sectors, price = bse.india_extra_price_universe()
+    assert tickers == ["NSDL", "OMEGAIN"]
+    assert price == {"NSDL": "NSDL.BO", "OMEGAIN": "OMEGAIN.BO"}   # yfinance .BO symbols
+
+
+def test_run_daily_prices_bse_names_with_bo_suffix(monkeypatch):
+    """Regression: BSE names must be fetched via .BO and NSE names via .NS."""
+    import screener.daily_report as dr
+
+    fetched: list[str] = []
+
+    class FakeFetcher:
+        def __init__(self, cache_dir=None):
+            pass
+
+        def get_data(self, symbol, *a, **k):
+            fetched.append(symbol)
+            return pd.DataFrame()          # empty -> loop skips scoring, keeps test light
+
+    monkeypatch.setattr(dr, "DataFetcher", FakeFetcher)
+    monkeypatch.setattr(dr, "compute_sector_rotation", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(dr, "get_ticker_list", lambda u: ["RELIANCE", "TCS"])
+    monkeypatch.setattr(dr, "load_constituents", lambda market="us": pd.DataFrame(
+        {"Symbol": ["RELIANCE", "TCS"], "sector": ["Energy", "IT"]}))
+    monkeypatch.setattr(dr, "get_fundamentals", lambda m, t: {})
+    monkeypatch.setattr(bse, "india_extra_price_universe",
+                        lambda: (["NSDL"], {"NSDL": None}, {"NSDL": "NSDL.BO"}))
+
+    out = dr.run_daily("2025-01-01", "2026-01-01", universe="nifty_total",
+                       market="in", show_progress=False)
+    assert "NSDL.BO" in fetched                                   # BSE priced via .BO
+    assert "RELIANCE.NS" in fetched and "TCS.NS" in fetched       # NSE priced via .NS
+    assert out["scanned"] == 3

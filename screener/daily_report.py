@@ -38,6 +38,7 @@ def run_daily(
     cache_dir: str = "data/yfinance_cache",
     market: str = "us",
     show_progress: bool = True,
+    include_bse: bool = True,
 ) -> dict:
     """Run the full daily pipeline and return the ranked candidates + context."""
     mkt = get_market(market)
@@ -61,9 +62,26 @@ def run_daily(
     # 2) Universe first — this also caches the constituent files the sector map reads.
     tickers = get_ticker_list(universe)
 
-    # 3) Ticker -> sector map (GICS for US, NSE Industry for India).
+    # 3) Ticker -> sector map (GICS for US, NSE Industry for India) and the yfinance
+    # price symbol per ticker (the market suffix — ``.NS`` for NSE — by default).
     constituents = load_constituents(market=mkt.key)
     sec_map = dict(zip(constituents["Symbol"], constituents["sector"]))
+    price_sym = {t: t + mkt.ticker_suffix for t in tickers}
+
+    # Fold in BSE-exclusive names, priced via their ``.BO`` yfinance symbols. The
+    # scorer's liquidity gate drops the illiquid ones, so only tradeable names score.
+    if mkt.key == "in" and include_bse:
+        from screener.data.bse import india_extra_price_universe
+        bse_tickers, bse_sectors, bse_price = india_extra_price_universe()
+        added = 0
+        for t in bse_tickers:
+            if t not in price_sym:                # keep NSE on any symbol clash
+                tickers.append(t)
+                price_sym[t] = bse_price[t]
+                sec_map.setdefault(t, bse_sectors.get(t))
+                added += 1
+        if added:
+            logger.info("Added %d BSE-exclusive names to the India price universe", added)
 
     # 4) Fundamentals from the latest committed snapshot (empty if never refreshed).
     funds = get_fundamentals(mkt.key, tickers)
@@ -76,8 +94,9 @@ def run_daily(
     filtered = 0
     iterator = tqdm(tickers, desc="Scoring", unit="ticker") if show_progress else tickers
     for ticker in iterator:
-        # Records key by the bare symbol; prices use the market's yfinance suffix.
-        df = fetcher.get_data(ticker + mkt.ticker_suffix, start_date, end_date, interval=interval)
+        # Records key by the bare symbol; prices use its resolved yfinance symbol
+        # (``.NS`` for NSE, ``.BO`` for BSE-exclusive names).
+        df = fetcher.get_data(price_sym[ticker], start_date, end_date, interval=interval)
         if df.empty:
             continue
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
@@ -168,6 +187,8 @@ def main():
                         help="Write the report text to this file")
     parser.add_argument("--html", type=str, default=None,
                         help="Write a standalone HTML dashboard to this path (GitHub Pages)")
+    parser.add_argument("--no-bse", action="store_true",
+                        help="India only: exclude the BSE-exclusive names (NSE price universe only)")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -194,6 +215,7 @@ def main():
         top_n=args.top,
         cache_dir=config.cache_dir,
         market=mkt.key,
+        include_bse=not args.no_bse,
     )
 
     report = format_report(result)
