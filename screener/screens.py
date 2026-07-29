@@ -22,6 +22,7 @@ class Screen:
     predicate: Predicate
     sort_by: str = "score"
     sort_desc: bool = True
+    markets: tuple[str, ...] | None = None   # None = every market; else only these
 
 
 def _sig(rec: StockRecord, name: str) -> bool:
@@ -49,15 +50,26 @@ SCREENS: list[Screen] = [
     Screen("big_gain", "Big Gainers",
            "A large single-day advance.",
            lambda r: _sig(r, "big_gain")),
-    # --- Quad-horizon momentum rotation (ported backtrader strategy) ---
+    # --- Quad-horizon momentum rotation (ported backtrader strategy; US) ---
     Screen("momentum_rotation", "Momentum Rotation",
            "Top-20 quad-horizon momentum names above their long-term trend — "
            "the rotation strategy's buy list.",
-           lambda r: _sig(r, "momentum_rotation"), sort_by="momentum"),
+           lambda r: _sig(r, "momentum_rotation"), sort_by="momentum", markets=("us",)),
     Screen("momentum_exits", "Momentum Exits",
            "Strong-momentum names that have closed below their long-term SMA250 — "
            "the rotation strategy's sell list.",
-           lambda r: r.signals.get("momentum_rotation") == "SELL", sort_by="momentum"),
+           lambda r: r.signals.get("momentum_rotation") == "SELL", sort_by="momentum",
+           markets=("us",)),
+    # --- Dual-horizon momentum rotation over the NIFTY MidSmallcap 400 (India) ---
+    Screen("dual_momentum_rotation", "MidSmallcap Momentum",
+           "Top-20 dual-horizon (189+63-day) momentum names in the NIFTY MidSmallcap "
+           "400 that are above their SMA150 — the mid/small-cap rotation buy list.",
+           lambda r: _sig(r, "dual_momentum_rotation"), sort_by="momentum", markets=("in",)),
+    Screen("dual_momentum_exits", "MidSmallcap Exits",
+           "MidSmallcap 400 momentum leaders that have closed below their SMA150 — "
+           "the mid/small-cap rotation sell list.",
+           lambda r: r.signals.get("dual_momentum_rotation") == "SELL", sort_by="momentum",
+           markets=("in",)),
     # --- Sector-driven ---
     Screen("sector_leaders", "Sector Leaders",
            "Stocks in sectors that are Leading or Improving on the RRG.",

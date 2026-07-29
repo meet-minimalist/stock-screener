@@ -31,8 +31,9 @@ COLUMNS = [
     {"key": "rel_sector_3m", "label": "vs Sec", "type": "ret",
      "desc": "3-month return relative to the stock's own sector (relative strength)."},
     {"key": "momentum", "label": "Mom", "type": "num", "dp": 2,
-     "desc": "Quad-horizon momentum score (skip-a-month, 189/147×1.5/126/63-day blend) "
-             "driving the Momentum Rotation buy/sell tabs."},
+     "desc": "Momentum score behind the momentum-rotation tabs — US: quad-horizon "
+             "(189/147×1.5/126/63-day, skip a month); India: dual-horizon (189+63-day) "
+             "over the NIFTY MidSmallcap 400."},
     {"key": "pe", "label": "P/E", "type": "num", "dp": 1,
      "desc": "Price-to-earnings ratio (lower = cheaper)."},
     {"key": "roe", "label": "ROE", "type": "pct",
@@ -53,9 +54,12 @@ _RECORD_FIELDS = ["ticker", "sector", "score", "price", "market_cap", "daily_vol
 def _payload(result: dict) -> tuple[list[dict], list[dict]]:
     """Build the per-record JSON rows (with screen membership) and screen metadata."""
     records = result.get("records", [])
+    market = result.get("market")
     membership: dict[str, set] = {}
     screen_meta: list[dict] = []
     for screen in SCREENS:
+        if screen.markets is not None and market not in screen.markets:
+            continue        # a market-scoped screen (e.g. US-only) off other pages
         hits = apply_screen(screen, records)
         membership[screen.key] = {r.ticker for r in hits}
         screen_meta.append({

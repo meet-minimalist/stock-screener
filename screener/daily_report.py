@@ -21,8 +21,13 @@ from screener.fundamentals import get_fundamentals
 from screener.markets import get_market
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
+from screener.screeners.dual_momentum_rotation import (
+    SIGNAL_KEY as DUAL_MOMENTUM_KEY,
+    UNIVERSE as DUAL_MOMENTUM_UNIVERSE,
+    assign_signals as assign_dual_signals,
+    compute_metrics as compute_dual_momentum,
+)
 from screener.screeners.momentum_rotation import (
-    MomentumMetrics,
     SIGNAL_KEY as MOMENTUM_ROTATION_KEY,
     assign_signals as assign_rotation_signals,
     compute_metrics as compute_momentum,
@@ -98,10 +103,12 @@ def run_daily(
 
     scored: list[dict] = []
     filtered = 0
-    # Momentum for the cross-sectional rotation signal is collected for *every* stock
-    # with enough history (not just the gate-passers), so the ranking pass below sees
-    # the whole universe; the signal is then attached to the scored records.
-    momentum_metrics: dict[str, MomentumMetrics] = {}
+    # Momentum for the cross-sectional rotation signal is a *market-specific* strategy:
+    # quad-horizon over the whole US universe, dual-horizon over the NIFTY MidSmallcap
+    # 400 for India. Collect it for every stock with enough history (not just the
+    # gate-passers) so the ranking pass below sees the full universe.
+    compute_mom = {"us": compute_momentum, "in": compute_dual_momentum}.get(mkt.key)
+    momentum_metrics: dict = {}
     iterator = tqdm(tickers, desc="Scoring", unit="ticker") if show_progress else tickers
     for ticker in iterator:
         # Records key by the bare symbol; prices use its resolved yfinance symbol
@@ -111,9 +118,10 @@ def run_daily(
             continue
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
                           macd_config=_MACD)
-        mm = compute_momentum(df)
-        if mm is not None:
-            momentum_metrics[ticker] = mm
+        if compute_mom is not None:
+            mm = compute_mom(df)
+            if mm is not None:
+                momentum_metrics[ticker] = mm
         res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx,
                            fund=funds.get(ticker))
         if res is None:
@@ -124,16 +132,32 @@ def run_daily(
         res.signals, res.signal_notes = compute_signals(ticker, df)  # screen membership + why
         scored.append(res)
 
-    # Cross-sectional momentum rotation: rank the whole universe, then stamp the BUY/
+    # Cross-sectional momentum rotation, market-specific: rank, then stamp the BUY/
     # SELL/NEUTRAL signal (and the raw momentum score) onto each scored record.
-    rotation_signals = assign_rotation_signals(momentum_metrics)
+    rotation_signals: dict[str, str] = {}
+    rotation_key: str | None = None
+    if mkt.key == "us":
+        rotation_signals = assign_rotation_signals(momentum_metrics)
+        rotation_key = MOMENTUM_ROTATION_KEY
+    elif mkt.key == "in":
+        try:
+            members = set(get_ticker_list(DUAL_MOMENTUM_UNIVERSE))
+        except Exception as exc:  # noqa: BLE001 - optional screen, never fatal
+            logger.warning("MidSmallcap 400 list unavailable (%s); skipping the dual "
+                           "momentum screen", exc)
+            members = set()
+        if members:
+            rotation_signals = assign_dual_signals(momentum_metrics, members)
+            rotation_key = DUAL_MOMENTUM_KEY
+
     for res in scored:
         mm = momentum_metrics.get(res.ticker)
         if mm is not None:
             res.momentum = round(mm.momentum, 4)
-        sig = rotation_signals.get(res.ticker)
-        if sig:
-            res.signals[MOMENTUM_ROTATION_KEY] = sig
+        if rotation_key:
+            sig = rotation_signals.get(res.ticker)
+            if sig:
+                res.signals[rotation_key] = sig
 
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)
     leaders = [r["sector"] for _, r in rotation.iterrows()

@@ -30,6 +30,8 @@ _NSE_SOURCES = {
                     "https://niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"),
     "nifty500": ("nifty500.csv",
                  "https://niftyindices.com/IndexConstituent/ind_nifty500list.csv"),
+    "nifty_midsmallcap400": ("nifty_midsmallcap400.csv",
+                             "https://niftyindices.com/IndexConstituent/ind_niftymidsmallcap400list.csv"),
 }
 
 _HEADERS = {
