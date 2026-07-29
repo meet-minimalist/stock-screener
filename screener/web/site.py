@@ -30,6 +30,9 @@ COLUMNS = [
     {"key": "ret_12m", "label": "12M", "type": "ret", "desc": "Price return over the last 12 months."},
     {"key": "rel_sector_3m", "label": "vs Sec", "type": "ret",
      "desc": "3-month return relative to the stock's own sector (relative strength)."},
+    {"key": "momentum", "label": "Mom", "type": "num", "dp": 2,
+     "desc": "Quad-horizon momentum score (skip-a-month, 189/147×1.5/126/63-day blend) "
+             "driving the Momentum Rotation buy/sell tabs."},
     {"key": "pe", "label": "P/E", "type": "num", "dp": 1,
      "desc": "Price-to-earnings ratio (lower = cheaper)."},
     {"key": "roe", "label": "ROE", "type": "pct",
@@ -43,7 +46,7 @@ COLUMNS = [
 ]
 
 _RECORD_FIELDS = ["ticker", "sector", "score", "price", "market_cap", "daily_vol",
-                  "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "pe", "roe",
+                  "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum", "pe", "roe",
                   "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
 
 

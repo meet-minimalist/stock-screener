@@ -21,6 +21,12 @@ from screener.fundamentals import get_fundamentals
 from screener.markets import get_market
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
+from screener.screeners.momentum_rotation import (
+    MomentumMetrics,
+    SIGNAL_KEY as MOMENTUM_ROTATION_KEY,
+    assign_signals as assign_rotation_signals,
+    compute_metrics as compute_momentum,
+)
 from screener.screeners.sector_rotation import compute_sector_rotation
 from screener.signals import compute_signals
 
@@ -92,6 +98,10 @@ def run_daily(
 
     scored: list[dict] = []
     filtered = 0
+    # Momentum for the cross-sectional rotation signal is collected for *every* stock
+    # with enough history (not just the gate-passers), so the ranking pass below sees
+    # the whole universe; the signal is then attached to the scored records.
+    momentum_metrics: dict[str, MomentumMetrics] = {}
     iterator = tqdm(tickers, desc="Scoring", unit="ticker") if show_progress else tickers
     for ticker in iterator:
         # Records key by the bare symbol; prices use its resolved yfinance symbol
@@ -101,6 +111,9 @@ def run_daily(
             continue
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
                           macd_config=_MACD)
+        mm = compute_momentum(df)
+        if mm is not None:
+            momentum_metrics[ticker] = mm
         res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx,
                            fund=funds.get(ticker))
         if res is None:
@@ -110,6 +123,17 @@ def run_daily(
             continue
         res.signals, res.signal_notes = compute_signals(ticker, df)  # screen membership + why
         scored.append(res)
+
+    # Cross-sectional momentum rotation: rank the whole universe, then stamp the BUY/
+    # SELL/NEUTRAL signal (and the raw momentum score) onto each scored record.
+    rotation_signals = assign_rotation_signals(momentum_metrics)
+    for res in scored:
+        mm = momentum_metrics.get(res.ticker)
+        if mm is not None:
+            res.momentum = round(mm.momentum, 4)
+        sig = rotation_signals.get(res.ticker)
+        if sig:
+            res.signals[MOMENTUM_ROTATION_KEY] = sig
 
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)
     leaders = [r["sector"] for _, r in rotation.iterrows()

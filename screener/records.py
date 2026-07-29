@@ -24,6 +24,7 @@ class StockRecord:
     ret_6m: float | None = None
     ret_12m: float | None = None
     rel_sector_3m: float | None = None
+    momentum: float | None = None       # quad-horizon momentum score (rotation signal)
 
     # Fundamentals (display).
     pe: float | None = None

@@ -49,6 +49,15 @@ SCREENS: list[Screen] = [
     Screen("big_gain", "Big Gainers",
            "A large single-day advance.",
            lambda r: _sig(r, "big_gain")),
+    # --- Quad-horizon momentum rotation (ported backtrader strategy) ---
+    Screen("momentum_rotation", "Momentum Rotation",
+           "Top-20 quad-horizon momentum names above their long-term trend — "
+           "the rotation strategy's buy list.",
+           lambda r: _sig(r, "momentum_rotation"), sort_by="momentum"),
+    Screen("momentum_exits", "Momentum Exits",
+           "Strong-momentum names that have closed below their long-term SMA250 — "
+           "the rotation strategy's sell list.",
+           lambda r: r.signals.get("momentum_rotation") == "SELL", sort_by="momentum"),
     # --- Sector-driven ---
     Screen("sector_leaders", "Sector Leaders",
            "Stocks in sectors that are Leading or Improving on the RRG.",
