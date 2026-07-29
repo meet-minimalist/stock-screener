@@ -81,7 +81,7 @@ INDIA = Market(
     currency="₹",
     benchmark="^NSEI",                # Nifty 50 (fallback ^CRSLDX = Nifty 500)
     sector_index=_IN_SECTOR_INDEX,
-    universe="nifty_total",
+    universe="nse_all",               # whole NSE mainboard ∪ Nifty Total (+ BSE add-on)
     ticker_suffix=".NS",
     fundamentals_source="screener_in",
     cap_tiers=_IN_CAP_TIERS,

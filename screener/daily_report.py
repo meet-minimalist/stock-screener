@@ -18,7 +18,7 @@ from screener.data.fetcher import DataFetcher
 from screener.data.sectors import load_constituents
 from screener.data.universe import get_ticker_list
 from screener.fundamentals import get_fundamentals
-from screener.markets import get_market
+from screener.markets import cap_classifier, get_market
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
 from screener.screeners.dual_momentum_rotation import (
@@ -158,6 +158,12 @@ def run_daily(
             sig = rotation_signals.get(res.ticker)
             if sig:
                 res.signals[rotation_key] = sig
+
+    # Size segment (Mega/Large/Mid/Small/Micro) so thin small/micro-caps are labelled
+    # rather than looking like blue chips. India ranks the fetched universe (SEBI-style).
+    classify = cap_classifier(mkt, [getattr(f, "market_cap", None) for f in funds.values()])
+    for res in scored:
+        res.cap_tier = classify(res.market_cap)
 
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)
     leaders = [r["sector"] for _, r in rotation.iterrows()

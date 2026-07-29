@@ -91,6 +91,28 @@ def _index_symbols(key: str, force_refresh: bool = False) -> list[str]:
     return sorted(fetch_index(key, force_refresh)["Symbol"].dropna().tolist())
 
 
+def _nse_equity_symbols(force_refresh: bool = False,
+                        series: tuple[str, ...] = ("EQ",)) -> list[str]:
+    """Every NSE *mainboard* equity symbol from the full ``EQUITY_L`` list.
+
+    Kept to the requested ``series`` — ``EQ`` (normal rolling settlement) by default,
+    dropping the ``BE``/``BZ`` trade-for-trade and surveillance segments (the NSE
+    analogue of the BSE T/Z groups). The list is fetched and cached by
+    ``screener.data.bse`` (``nse_equity_full.csv``); we reuse that cache here rather
+    than hitting NSE again. NSE Emerge SME names use a separate feed and are absent.
+    """
+    from screener.data.bse import NSE_EQUITY_CACHE, fetch_nse_isins
+    if force_refresh or not NSE_EQUITY_CACHE.exists():
+        fetch_nse_isins(force_refresh=True)          # side effect: writes the cache
+    df = pd.read_csv(NSE_EQUITY_CACHE)
+    df.columns = [c.strip() for c in df.columns]
+    sym_col = next((c for c in df.columns if c.upper() == "SYMBOL"), "SYMBOL")
+    ser_col = next((c for c in df.columns if c.upper() == "SERIES"), None)
+    if ser_col is not None:
+        df = df[df[ser_col].astype(str).str.strip().isin(series)]
+    return df[sym_col].astype(str).str.strip().str.upper().tolist()
+
+
 def fetch_sp500(force_refresh: bool = False) -> list[str]:
     """Back-compat helper: the S&P 500 symbol list."""
     return _index_symbols("sp500", force_refresh)
@@ -109,6 +131,14 @@ def get_ticker_list(source: str = "sp500", force_refresh: bool = False) -> list[
         symbols: set[str] = set()
         for tier in SP1500_TIERS:
             symbols.update(_index_symbols(tier, force_refresh))
+        return sorted(symbols)
+    if source in ("nse_all", "india_all"):
+        # The whole investable NSE: full mainboard equity list unioned with the Nifty
+        # Total Market index (a handful of index names sit in non-EQ series, so the
+        # union never drops a current constituent).
+        symbols = set(_nse_equity_symbols(force_refresh))
+        symbols.update(fetch_nse_index("nifty_total", force_refresh)["Symbol"]
+                       .dropna().astype(str).str.strip().str.upper())
         return sorted(symbols)
     if source in _NSE_SOURCES:
         return sorted(fetch_nse_index(source, force_refresh)["Symbol"].dropna().tolist())

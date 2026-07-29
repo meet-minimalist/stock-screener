@@ -65,11 +65,15 @@ details.method li b { color:var(--ink); }
 .btn:hover { filter:brightness(1.06); }
 .count { color:var(--muted); font-size:.8rem; }
 
-.tablewrap { border:1px solid var(--line); border-radius:12px; overflow-x:auto; background:var(--card); }
+/* Bounded scroll box so the sticky header actually freezes on vertical scroll
+   (an unbounded wrapper scrolls with the page and the header rides away). */
+.tablewrap { border:1px solid var(--line); border-radius:12px; overflow:auto; max-height:80vh;
+  background:var(--card); }
 table { border-collapse:collapse; width:100%; font-size:.85rem; }
 th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--line2); white-space:nowrap; }
-th { position:sticky; top:0; background:var(--card); color:var(--muted); font-weight:600; font-size:.7rem;
-  text-transform:uppercase; letter-spacing:.03em; cursor:pointer; user-select:none; }
+th { position:sticky; top:0; z-index:2; background:var(--card); color:var(--muted); font-weight:600;
+  font-size:.7rem; text-transform:uppercase; letter-spacing:.03em; cursor:pointer; user-select:none;
+  box-shadow:inset 0 -1px 0 var(--line); }
 th.left, td.left { text-align:left; }
 th.has-desc { cursor:help; border-bottom:1px dotted var(--muted); }
 th.has-desc[aria-sort] { cursor:pointer; }

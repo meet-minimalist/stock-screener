@@ -21,6 +21,10 @@ COLUMNS = [
      "desc": "Latest close (US in $, India in ₹)."},
     {"key": "market_cap", "label": "Mkt Cap", "type": "mcap",
      "desc": "Market capitalisation (US in $, India in ₹ crore)."},
+    {"key": "cap_tier", "label": "Segment", "type": "tag", "align": "left",
+     "desc": "Size segment by market cap. India (SEBI rank-based): top 100 by market "
+             "cap are Large, the next 150 Mid, the rest Small — so mid/small/micro-caps "
+             "are labelled, not mistaken for blue chips."},
     {"key": "sector", "label": "Sector", "type": "text", "align": "left",
      "desc": "Sector classification."},
     {"key": "daily_vol", "label": "Vol%", "type": "num", "dp": 1,
@@ -46,7 +50,7 @@ COLUMNS = [
      "desc": "Plain-language summary of why the stock scored as it did."},
 ]
 
-_RECORD_FIELDS = ["ticker", "sector", "score", "price", "market_cap", "daily_vol",
+_RECORD_FIELDS = ["ticker", "sector", "cap_tier", "score", "price", "market_cap", "daily_vol",
                   "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum", "pe", "roe",
                   "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
 

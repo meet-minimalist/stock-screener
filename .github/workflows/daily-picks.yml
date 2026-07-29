@@ -86,7 +86,7 @@ jobs:
           echo "start=$(date -u -d '550 days ago' +%F)" >> "$GITHUB_OUTPUT"
       - name: Build India pages
         run: |
-          python -m screener.daily_report --market in --universe nifty_total \
+          python -m screener.daily_report --market in --universe nse_all \
             --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
             --top 30 --html ./_site/in/index.html
           python -m screener.fundamental_screener --market in --html ./_site/in/fundamentals/index.html

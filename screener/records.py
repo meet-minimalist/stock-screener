@@ -33,6 +33,7 @@ class StockRecord:
     eps_growth: float | None = None
     debt_equity: float | None = None
     market_cap: float | None = None
+    cap_tier: str | None = None         # size segment (Mega/Large/Mid/Small/Micro)
 
     # Ratings + provenance.
     factors: dict[str, float] = field(default_factory=dict)
