@@ -37,6 +37,8 @@ class StockRecord:
 
     # Virtual-portfolio state for the MidSmallcap momentum strategy (India).
     entry_price: float | None = None    # the strategy's simulated entry (buy) price
+    entry_date: str | None = None       # when the buy signal fired
+    days_held: int | None = None        # trading days held so far (open positions)
     stop_loss: float | None = None      # current trailing-stop level
     pl_pct: float | None = None         # gain/loss vs entry (open or realised)
     exit_reason: str | None = None      # why the strategy exited (sold names)

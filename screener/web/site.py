@@ -42,6 +42,11 @@ COLUMNS = [
      "desc": "The MidSmallcap strategy's simulated entry (buy) price for this position — "
              "a reference from replaying the strategy over ~18 months, not your own cost. "
              "On the Rebuys tab it's the earlier entry, shown for reference."},
+    {"key": "entry_date", "label": "Bought", "type": "text", "align": "left",
+     "desc": "Date the buy signal fired / the strategy entered this position."},
+    {"key": "days_held", "label": "Held", "type": "num", "dp": 0,
+     "desc": "Trading days the position has been held so far (there's no fixed holding "
+             "period — the strategy holds until an exit fires)."},
     {"key": "stop_loss", "label": "Stop", "type": "money",
      "desc": "Current trailing-stop level (post-entry peak × (1 − 15%)) — feed this as "
              "your stop-loss when buying. Rises as the position rises."},
@@ -66,7 +71,8 @@ COLUMNS = [
 
 _RECORD_FIELDS = ["ticker", "sector", "cap_tier", "score", "price", "market_cap", "daily_vol",
                   "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum",
-                  "entry_price", "stop_loss", "pl_pct", "exit_reason", "days_ago",
+                  "entry_price", "entry_date", "days_held", "stop_loss", "pl_pct",
+                  "exit_reason", "days_ago",
                   "pe", "roe", "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
 
 

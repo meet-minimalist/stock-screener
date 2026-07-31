@@ -49,16 +49,18 @@ WEIGHT_PCT = round(SLOT_FRAC / TOP_N * 100, 1)   # equal-weight sizing, ≈ 4.9%
 class HeldName:
     ticker: str
     entry_price: float
+    entry_date: str           # when the strategy entered (buy signal date)
     current_price: float
     stop_loss: float          # peak * (1 - TRAIL_PCT), the live trailing stop
     gain_pct: float
-    days_held: int
+    days_held: int            # trading days held so far
 
 
 @dataclass
 class SoldName:
     ticker: str
     entry_price: float
+    entry_date: str           # when the (now-closed) position was entered
     exit_price: float
     gain_pct: float
     reason: str
@@ -106,6 +108,14 @@ def _last_valid(col: pd.Series) -> float | None:
     return float(v.iloc[-1]) if len(v) else None
 
 
+def _date_str(label) -> str:
+    """ISO date for a panel index label (a Timestamp on real data)."""
+    try:
+        return label.date().isoformat()
+    except AttributeError:
+        return str(label)
+
+
 def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
     """Replay the strategy over aligned close series and report the book at the end."""
     closes = {t: s for t, s in closes.items() if s is not None and not s.dropna().empty}
@@ -120,7 +130,7 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
     held: dict[str, _Position] = {}
     cooldown_until: dict[str, int] = {}
     last_entry: dict[str, float] = {}          # most recent entry price, kept after a sale
-    exits: dict[str, tuple[int, float, float, str]] = {}  # ticker -> (idx, entry, exit, reason)
+    exits: dict[str, tuple] = {}  # ticker -> (exit_idx, entry_idx, entry, exit, reason)
     last_ranked: list[str] = []
 
     for i in range(n):
@@ -140,7 +150,7 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
             if trend_break or stop_hit:
                 reason = ("trend break + stop" if trend_break and stop_hit
                           else "trailing stop" if stop_hit else "trend break")
-                exits[sym] = (i, pos.entry_price, float(px), reason)
+                exits[sym] = (i, pos.entry_idx, pos.entry_price, float(px), reason)
                 del held[sym]
                 cooldown_until[sym] = i + COOLDOWN_BARS
 
@@ -164,7 +174,8 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
                     px = row[sym]
                     if pd.isna(px):
                         continue
-                    exits[sym] = (i, held[sym].entry_price, float(px), "dropped from top 40")
+                    exits[sym] = (i, held[sym].entry_idx, held[sym].entry_price,
+                                  float(px), "dropped from top 40")
                     del held[sym]
                     cooldown_until[sym] = i + COOLDOWN_BARS
 
@@ -190,19 +201,21 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
             continue
         peak = max(pos.peak, cur)
         held_out.append(HeldName(
-            ticker=sym, entry_price=round(pos.entry_price, 2), current_price=round(cur, 2),
+            ticker=sym, entry_price=round(pos.entry_price, 2),
+            entry_date=_date_str(dates[pos.entry_idx]), current_price=round(cur, 2),
             stop_loss=round(peak * (1.0 - TRAIL_PCT), 2),
             gain_pct=round((cur / pos.entry_price - 1.0) * 100.0, 1),
             days_held=last - pos.entry_idx,
         ))
 
     sold_out: list[SoldName] = []
-    for sym, (idx, entry, exit_px, reason) in exits.items():
+    for sym, (idx, entry_idx, entry, exit_px, reason) in exits.items():
         days_ago = last - idx
         if days_ago > RECENT_SELL_DAYS:
             continue
         sold_out.append(SoldName(
-            ticker=sym, entry_price=round(entry, 2), exit_price=round(exit_px, 2),
+            ticker=sym, entry_price=round(entry, 2), entry_date=_date_str(dates[entry_idx]),
+            exit_price=round(exit_px, 2),
             gain_pct=round((exit_px / entry - 1.0) * 100.0, 1),
             reason=reason, days_ago=days_ago,
         ))

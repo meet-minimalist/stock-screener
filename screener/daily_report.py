@@ -227,6 +227,7 @@ def _attach_midsmall_portfolio(scored: list, member_closes: dict, sec_map: dict,
         r = rec_for(h.ticker, h.current_price)
         r.signals[DUAL_MOMENTUM_KEY] = "BUY"
         r.entry_price, r.stop_loss, r.pl_pct = h.entry_price, h.stop_loss, h.gain_pct
+        r.entry_date, r.days_held = h.entry_date, h.days_held
         if r.price is None:
             r.price = h.current_price
 
@@ -234,6 +235,7 @@ def _attach_midsmall_portfolio(scored: list, member_closes: dict, sec_map: dict,
         r = rec_for(s.ticker, s.exit_price)
         r.signals[DUAL_MOMENTUM_KEY if s.days_ago == 0 else DUAL_RECENT_KEY] = "SELL"
         r.entry_price, r.pl_pct = s.entry_price, s.gain_pct
+        r.entry_date = s.entry_date
         r.exit_reason, r.days_ago = s.reason, s.days_ago
         if r.price is None:
             r.price = s.exit_price

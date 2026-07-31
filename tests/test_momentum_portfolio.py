@@ -15,6 +15,10 @@ def _rising(n: int, rate: float, start: float = 100.0) -> list[float]:
     return [start * (1.0 + rate) ** i for i in range(n)]
 
 
+def win_idx_date(n: int, i: int) -> str:
+    return pd.date_range("2024-01-01", periods=n, freq="B")[i].date().isoformat()
+
+
 def test_held_name_reports_entry_stop_and_gain():
     n = 260
     win = _rising(n, 0.004)                       # monotonic riser -> bought and held
@@ -27,6 +31,7 @@ def test_held_name_reports_entry_stop_and_gain():
     assert h.stop_loss == round(win[-1] * (1 - mp.TRAIL_PCT), 2)   # trails the (rising) peak
     assert h.gain_pct > 0
     assert h.days_held == (n - 1) - 190
+    assert h.entry_date == win_idx_date(n, 190)          # when the buy signal fired
 
 
 def test_trailing_stop_exit_shows_up_as_recently_sold():
