@@ -115,6 +115,10 @@ def test_run_daily_india_attaches_the_dual_momentum_signal(monkeypatch):
     recs = {r.ticker: r for r in out["records"]}
     assert set(recs) == {"AAA", "BBB"}
     for r in recs.values():
-        assert r.signals.get(dr.DUAL_MOMENTUM_KEY) == "BUY"        # both are top momentum
+        assert r.signals.get(dr.DUAL_MOMENTUM_KEY) == "BUY"        # both currently held
         assert dr.MOMENTUM_ROTATION_KEY not in r.signals          # quad is US-only
         assert r.momentum is not None
+        # The virtual-portfolio replay carries entry price + trailing stop.
+        assert r.entry_price is not None and r.stop_loss is not None
+        assert r.stop_loss < r.price                              # stop trails 15% below peak
+        assert r.pl_pct > 0                                       # steady riser, held at a gain

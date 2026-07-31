@@ -35,6 +35,13 @@ class StockRecord:
     market_cap: float | None = None
     cap_tier: str | None = None         # size segment (Mega/Large/Mid/Small/Micro)
 
+    # Virtual-portfolio state for the MidSmallcap momentum strategy (India).
+    entry_price: float | None = None    # the strategy's simulated entry (buy) price
+    stop_loss: float | None = None      # current trailing-stop level
+    pl_pct: float | None = None         # gain/loss vs entry (open or realised)
+    exit_reason: str | None = None      # why the strategy exited (sold names)
+    days_ago: int | None = None         # trading days since the exit (0 = today)
+
     # Ratings + provenance.
     factors: dict[str, float] = field(default_factory=dict)
     triggers: list[str] = field(default_factory=list)

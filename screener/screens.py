@@ -61,15 +61,27 @@ SCREENS: list[Screen] = [
            lambda r: r.signals.get("momentum_rotation") == "SELL", sort_by="momentum",
            markets=("us",)),
     # --- Dual-horizon momentum rotation over the NIFTY MidSmallcap 400 (India) ---
+    # Driven by a virtual-portfolio replay of the strategy, so each carries entry price,
+    # trailing stop and cooldown state. Sizing is equal-weight (~4.9% of portfolio/name).
     Screen("dual_momentum_rotation", "MidSmallcap Momentum",
-           "Top-20 dual-horizon (189+63-day) momentum names in the NIFTY MidSmallcap "
-           "400 that are above their SMA150 — the mid/small-cap rotation buy list.",
+           "The names the dual-horizon (189+63-day) strategy currently holds in the "
+           "NIFTY MidSmallcap 400 — with the strategy's entry price and live trailing "
+           "stop. Equal-weight sizing: ~4.9% of the portfolio per name.",
            lambda r: _sig(r, "dual_momentum_rotation"), sort_by="momentum", markets=("in",)),
     Screen("dual_momentum_exits", "MidSmallcap Exits",
-           "MidSmallcap 400 momentum leaders that have closed below their SMA150 — "
-           "the mid/small-cap rotation sell list.",
+           "Holdings the strategy exits today — trend break (below SMA150), trailing "
+           "stop, or dropped from the top 40. Shows the entry price and realised P/L.",
            lambda r: r.signals.get("dual_momentum_rotation") == "SELL", sort_by="momentum",
            markets=("in",)),
+    Screen("dual_momentum_recent", "MidSmallcap Recently Sold",
+           "Positions the strategy exited within the last few weeks (Sold = trading days "
+           "ago) — if you still hold one, it's a late sell hint. Shows entry price and P/L.",
+           lambda r: r.signals.get("dual_momentum_recent") == "SELL", sort_by="days_ago",
+           sort_desc=False, markets=("in",)),
+    Screen("dual_momentum_rebuy", "MidSmallcap Rebuys",
+           "Names the strategy sold earlier that are now past their cooldown and back in "
+           "the top-20 — a fresh entry (at today's price; earlier entry shown for reference).",
+           lambda r: _sig(r, "dual_momentum_rebuy"), sort_by="momentum", markets=("in",)),
     # --- Sector-driven ---
     Screen("sector_leaders", "Sector Leaders",
            "Stocks in sectors that are Leading or Improving on the RRG.",

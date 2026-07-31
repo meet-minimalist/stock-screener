@@ -163,6 +163,24 @@ SCRIPT = r"""
     return rows;
   }
 
+  // Always-shown columns; the rest appear only when the active tab has data for them,
+  // so tab-specific columns (e.g. Buy Px / Stop / Reason) don't clutter other tabs.
+  var ALWAYS_COLS = { rank:1, ticker:1 };
+  function cellVal(rec, col, i) {
+    if (col.key==="rank") return i+1;
+    if (col.key==="reason") return (rec.signal_notes && rec.signal_notes[state.tab]) || rec.reason;
+    return rec[col.key];
+  }
+  function visibleColumns(rows, sc) {
+    var sortKey = state.sortKey || sc.sort_by;
+    return COLUMNS.filter(function (c) {
+      if (ALWAYS_COLS[c.key] || c.key===sortKey) return true;
+      for (var r=0;r<rows.length;r++){ var v=cellVal(rows[r], c, r);
+        if (v!==null && v!==undefined && v!=="") return true; }
+      return false;
+    });
+  }
+
   function render() {
     var sc = screenByKey(state.tab);
     $("#tabdesc").textContent = sc.description;
@@ -171,9 +189,10 @@ SCRIPT = r"""
     });
     var rows = currentRows();
     $("#count").textContent = rows.length + " stocks";
+    var cols = visibleColumns(rows, sc);
 
     var head = "<tr>";
-    for (var i=0;i<COLUMNS.length;i++){ var c=COLUMNS[i];
+    for (var i=0;i<cols.length;i++){ var c=cols[i];
       var sortKey = state.sortKey || sc.sort_by, dir = state.sortKey ? state.sortDir : (sc.sort_desc?-1:1);
       var aria = (c.key===sortKey && c.sortable!==false) ? (dir===1?"ascending":"descending") : "none";
       var titleAttr = c.desc ? ' title="'+String(c.desc).replace(/"/g,"&quot;")+'"' : '';
@@ -181,13 +200,10 @@ SCRIPT = r"""
     head += "</tr>";
 
     var body = "";
-    if (!rows.length) body = '<tr><td class="empty" colspan="'+COLUMNS.length+'">No stocks match this screen and filters.</td></tr>';
+    if (!rows.length) body = '<tr><td class="empty" colspan="'+cols.length+'">No stocks match this screen and filters.</td></tr>';
     for (var r=0;r<rows.length;r++){ var rec=rows[r]; body += "<tr>";
-      for (var j=0;j<COLUMNS.length;j++){ var col=COLUMNS[j];
-        var val;
-        if (col.key==="rank") val = r+1;
-        else if (col.key==="reason") val = (rec.signal_notes && rec.signal_notes[state.tab]) || rec.reason;
-        else val = rec[col.key];
+      for (var j=0;j<cols.length;j++){ var col=cols[j];
+        var val = cellVal(rec, col, r);
         var cls = col.align==="left" ? "left" : "num"; if (col.key==="ticker") cls+=" tk"; if (col.key==="rank") cls+=" rank"; if (col.key==="reason") cls="why";
         body += '<td class="'+cls+'">'+fmt(col, val)+"</td>"; }
       body += "</tr>"; }

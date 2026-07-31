@@ -38,6 +38,20 @@ COLUMNS = [
      "desc": "Momentum score behind the momentum-rotation tabs — US: quad-horizon "
              "(189/147×1.5/126/63-day, skip a month); India: dual-horizon (189+63-day) "
              "over the NIFTY MidSmallcap 400."},
+    {"key": "entry_price", "label": "Buy Px", "type": "money",
+     "desc": "The MidSmallcap strategy's simulated entry (buy) price for this position — "
+             "a reference from replaying the strategy over ~18 months, not your own cost. "
+             "On the Rebuys tab it's the earlier entry, shown for reference."},
+    {"key": "stop_loss", "label": "Stop", "type": "money",
+     "desc": "Current trailing-stop level (post-entry peak × (1 − 15%)) — feed this as "
+             "your stop-loss when buying. Rises as the position rises."},
+    {"key": "pl_pct", "label": "P/L", "type": "ret",
+     "desc": "Gain/loss vs the strategy's entry — open for held names, realised for sold."},
+    {"key": "exit_reason", "label": "Reason", "type": "text", "align": "left",
+     "desc": "Why the strategy exited: trend break (below SMA150), trailing stop, or "
+             "dropped from the top 40."},
+    {"key": "days_ago", "label": "Sold", "type": "num", "dp": 0,
+     "desc": "Trading days since the exit (0 = today)."},
     {"key": "pe", "label": "P/E", "type": "num", "dp": 1,
      "desc": "Price-to-earnings ratio (lower = cheaper)."},
     {"key": "roe", "label": "ROE", "type": "pct",
@@ -51,8 +65,9 @@ COLUMNS = [
 ]
 
 _RECORD_FIELDS = ["ticker", "sector", "cap_tier", "score", "price", "market_cap", "daily_vol",
-                  "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum", "pe", "roe",
-                  "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
+                  "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum",
+                  "entry_price", "stop_loss", "pl_pct", "exit_reason", "days_ago",
+                  "pe", "roe", "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
 
 
 def _payload(result: dict) -> tuple[list[dict], list[dict]]:

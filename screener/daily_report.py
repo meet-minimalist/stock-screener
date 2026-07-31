@@ -21,12 +21,18 @@ from screener.fundamentals import get_fundamentals
 from screener.markets import cap_classifier, get_market
 from screener.indicators.calculator import IndicatorCalculator
 from screener.scoring import ConvictionScorer
+from screener.records import StockRecord
 from screener.screeners.dual_momentum_rotation import (
     SIGNAL_KEY as DUAL_MOMENTUM_KEY,
     UNIVERSE as DUAL_MOMENTUM_UNIVERSE,
-    assign_signals as assign_dual_signals,
     compute_metrics as compute_dual_momentum,
 )
+from screener.screeners.momentum_portfolio import TRAIL_PCT as _MS_TRAIL, simulate as _simulate_midsmall
+
+# Signal keys for the MidSmallcap portfolio views (India). Held/sold-today reuse the
+# rotation key (BUY/SELL); recently-sold and rebuy get their own so they tab separately.
+DUAL_RECENT_KEY = "dual_momentum_recent"
+DUAL_REBUY_KEY = "dual_momentum_rebuy"
 from screener.screeners.momentum_rotation import (
     SIGNAL_KEY as MOMENTUM_ROTATION_KEY,
     assign_signals as assign_rotation_signals,
@@ -109,6 +115,15 @@ def run_daily(
     # gate-passers) so the ranking pass below sees the full universe.
     compute_mom = {"us": compute_momentum, "in": compute_dual_momentum}.get(mkt.key)
     momentum_metrics: dict = {}
+    # For India, keep the raw close of every NIFTY MidSmallcap 400 member so the
+    # portfolio simulator can replay the strategy (entry prices, stops, cooldowns).
+    members: set[str] = set()
+    member_closes: dict = {}
+    if mkt.key == "in":
+        try:
+            members = set(get_ticker_list(DUAL_MOMENTUM_UNIVERSE))
+        except Exception as exc:  # noqa: BLE001 - optional screens, never fatal
+            logger.warning("MidSmallcap 400 list unavailable (%s); skipping its screens", exc)
     iterator = tqdm(tickers, desc="Scoring", unit="ticker") if show_progress else tickers
     for ticker in iterator:
         # Records key by the bare symbol; prices use its resolved yfinance symbol
@@ -122,6 +137,8 @@ def run_daily(
             mm = compute_mom(df)
             if mm is not None:
                 momentum_metrics[ticker] = mm
+        if ticker in members:
+            member_closes[ticker] = df["Close"]
         res = scorer.score(ticker, sec_map.get(ticker), df, sector_ctx,
                            fund=funds.get(ticker))
         if res is None:
@@ -132,32 +149,26 @@ def run_daily(
         res.signals, res.signal_notes = compute_signals(ticker, df)  # screen membership + why
         scored.append(res)
 
-    # Cross-sectional momentum rotation, market-specific: rank, then stamp the BUY/
-    # SELL/NEUTRAL signal (and the raw momentum score) onto each scored record.
-    rotation_signals: dict[str, str] = {}
-    rotation_key: str | None = None
-    if mkt.key == "us":
-        rotation_signals = assign_rotation_signals(momentum_metrics)
-        rotation_key = MOMENTUM_ROTATION_KEY
-    elif mkt.key == "in":
-        try:
-            members = set(get_ticker_list(DUAL_MOMENTUM_UNIVERSE))
-        except Exception as exc:  # noqa: BLE001 - optional screen, never fatal
-            logger.warning("MidSmallcap 400 list unavailable (%s); skipping the dual "
-                           "momentum screen", exc)
-            members = set()
-        if members:
-            rotation_signals = assign_dual_signals(momentum_metrics, members)
-            rotation_key = DUAL_MOMENTUM_KEY
-
+    # Momentum score (display) for every gate-passing record.
     for res in scored:
         mm = momentum_metrics.get(res.ticker)
         if mm is not None:
             res.momentum = round(mm.momentum, 4)
-        if rotation_key:
+
+    # Market-specific momentum signals. US: stateless quad-horizon rotation. India:
+    # a virtual-portfolio replay of the MidSmallcap strategy (held/sold/rebuy with
+    # entry prices + stops), which can surface names the liquidity gate dropped, so
+    # those get lightweight synthesised records appended below.
+    extra_records: list[StockRecord] = []
+    if mkt.key == "us":
+        rotation_signals = assign_rotation_signals(momentum_metrics)
+        for res in scored:
             sig = rotation_signals.get(res.ticker)
             if sig:
-                res.signals[rotation_key] = sig
+                res.signals[MOMENTUM_ROTATION_KEY] = sig
+    elif mkt.key == "in" and member_closes:
+        extra_records = _attach_midsmall_portfolio(scored, member_closes, sec_map,
+                                                   momentum_metrics)
 
     # Size segment (Mega/Large/Mid/Small/Micro) so thin small/micro-caps are labelled
     # rather than looking like blue chips. India ranks the fetched universe (SEBI-style).
@@ -166,6 +177,7 @@ def run_daily(
         res.cap_tier = classify(res.market_cap)
 
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)
+    records = ranked + extra_records          # extra = MidSmallcap names below the gate
     leaders = [r["sector"] for _, r in rotation.iterrows()
                if r["quadrant"] in ("Leading", "Improving")]
 
@@ -180,10 +192,61 @@ def run_daily(
         "filtered_out": filtered,
         "leading_sectors": leaders[:5],
         "rotation": rotation,
-        "records": ranked,       # all passing StockRecords (for the screen tabs)
+        "records": records,      # passing StockRecords + MidSmallcap portfolio names
         "ranked": ranked,
         "top": ranked[:top_n],
     }
+
+
+def _attach_midsmall_portfolio(scored: list, member_closes: dict, sec_map: dict,
+                               momentum_metrics: dict) -> list:
+    """Replay the MidSmallcap strategy and stamp held/sold/rebuy state onto records.
+
+    Enriches the matching scored record where present; otherwise synthesises a minimal
+    record (score ``None`` so it only surfaces in the MidSmallcap tabs, never the
+    conviction screens) for names the liquidity gate dropped. Returns the synthesised
+    records to append to the page's record list.
+    """
+    pf = _simulate_midsmall(member_closes)
+    by_ticker = {r.ticker: r for r in scored}
+    extra: list = []
+
+    def rec_for(ticker: str, price: float | None):
+        r = by_ticker.get(ticker)
+        if r is None:
+            r = StockRecord(ticker=ticker, sector=sec_map.get(ticker),
+                            price=round(price, 2) if price is not None else None)
+            mm = momentum_metrics.get(ticker)
+            if mm is not None:
+                r.momentum = round(mm.momentum, 4)
+            by_ticker[ticker] = r
+            extra.append(r)
+        return r
+
+    for h in pf.held:                              # currently held -> BUY list, with stop
+        r = rec_for(h.ticker, h.current_price)
+        r.signals[DUAL_MOMENTUM_KEY] = "BUY"
+        r.entry_price, r.stop_loss, r.pl_pct = h.entry_price, h.stop_loss, h.gain_pct
+        if r.price is None:
+            r.price = h.current_price
+
+    for s in pf.sold:                              # exited: today -> SELL, older -> recent
+        r = rec_for(s.ticker, s.exit_price)
+        r.signals[DUAL_MOMENTUM_KEY if s.days_ago == 0 else DUAL_RECENT_KEY] = "SELL"
+        r.entry_price, r.pl_pct = s.entry_price, s.gain_pct
+        r.exit_reason, r.days_ago = s.reason, s.days_ago
+        if r.price is None:
+            r.price = s.exit_price
+
+    for rb in pf.rebuys:                           # off cooldown, re-qualified -> rebuy
+        r = rec_for(rb.ticker, rb.current_price)
+        r.signals[DUAL_REBUY_KEY] = "BUY"
+        r.entry_price = rb.prev_entry_price        # earlier entry, for reference
+        r.stop_loss = round(rb.current_price * (1.0 - _MS_TRAIL), 2)
+        if r.price is None:
+            r.price = rb.current_price
+
+    return extra
 
 
 def format_report(result: dict) -> str:
