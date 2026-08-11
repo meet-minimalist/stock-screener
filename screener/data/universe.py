@@ -132,6 +132,9 @@ def get_ticker_list(source: str = "sp500", force_refresh: bool = False) -> list[
         for tier in SP1500_TIERS:
             symbols.update(_index_symbols(tier, force_refresh))
         return sorted(symbols)
+    if source == "india_sme":
+        from screener.data.sme import load_sme
+        return sorted(load_sme(force_refresh)["Symbol"].dropna().astype(str).tolist())
     if source in ("nse_all", "india_all"):
         # The whole investable NSE: full mainboard equity list unioned with the Nifty
         # Total Market index (a handful of index names sit in non-EQ series, so the

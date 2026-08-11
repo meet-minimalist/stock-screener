@@ -102,6 +102,15 @@ def load_constituents(sector: str | None = None, market: str = "us") -> pd.DataF
                 f"No S&P constituent files in {TICKERS_DIR}. Run the universe fetch first.")
         df = pd.concat(frames, ignore_index=True)
         df["Symbol"] = df["Symbol"].astype(str).str.replace(".", "-", regex=False).str.strip()
+    elif market == "in_sme":
+        # SME sources carry no sector; keep the identity columns so records still map.
+        path = TICKERS_DIR / "india_sme.csv"
+        if not path.exists():
+            return pd.DataFrame(columns=["Symbol", "Security", "sector"])
+        df = pd.read_csv(path).rename(columns={"Company Name": "Security"})
+        df["sector"] = None
+        df = df[["Symbol", "Security", "sector"]]
+        df["Symbol"] = df["Symbol"].astype(str).str.strip().str.upper()
     else:
         path = TICKERS_DIR / "nifty_total.csv"
         if not path.exists():

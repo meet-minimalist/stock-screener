@@ -41,6 +41,14 @@ def main() -> None:
     kwargs: dict = {"tickers": tickers}
     if mkt.key == "us":
         kwargs["chunk_size"] = args.chunk_size          # finviz ticker-list chunks
+    elif mkt.key == "in_sme":
+        # SME is its own universe: resolve BSE SME names by scrip code; no sector, no
+        # mainboard BSE add-on.
+        from screener.data.sme import sme_universe
+        _sme_t, aliases, _sec = sme_universe()
+        if aliases:
+            kwargs["aliases"] = aliases
+        kwargs["sectors"] = {}
     else:
         # Attach the NSE Industry so India records carry a sector for the screener.
         con = load_constituents(market=mkt.key)

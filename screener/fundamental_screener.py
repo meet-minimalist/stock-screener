@@ -18,6 +18,7 @@ from prettytable import PrettyTable
 
 from screener.fundamentals import get_fundamentals, grade
 from screener.web import nav_html, render_screener_body, wrap_page
+from screener.web.site import sme_caveat_html
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +238,7 @@ def build_body(funds: dict, as_of: str = "", market: str = "us") -> str:
   <h1>🧮 {html.escape(mkt.label)} Fundamental Screener</h1>
   <div class="meta">As of <b>{html.escape(str(as_of))}</b> ·
     graded {len(rows)} stocks · <a href="../">← Daily screener</a></div>
+  {sme_caveat_html(mkt.key)}
   <div class="tiles">
     <div class="tile"><div class="k">{len(rows)}</div><div class="l">Graded</div></div>
     <div class="tile"><div class="k">{grades['A']}</div><div class="l">A-grade</div></div>

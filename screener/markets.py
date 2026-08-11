@@ -87,7 +87,23 @@ INDIA = Market(
     cap_tiers=_IN_CAP_TIERS,
 )
 
-MARKETS: dict[str, Market] = {US.key: US, INDIA.key: INDIA}
+# India SME — a *separate* market so it never touches mainboard filtration. Its price
+# symbols are a mix of ``.NS`` (NSE Emerge) and ``.BO`` (BSE SME) resolved explicitly in
+# the pipeline, so ``ticker_suffix`` is only a nominal fallback. No sector RRG (SME
+# carries no sector), and a relaxed liquidity gate is applied in the daily pipeline.
+INDIA_SME = Market(
+    key="in_sme",
+    label="India SME",
+    currency="₹",
+    benchmark="^NSEI",
+    sector_index={},
+    universe="india_sme",
+    ticker_suffix=".NS",
+    fundamentals_source="screener_in",
+    cap_tiers=_IN_CAP_TIERS,
+)
+
+MARKETS: dict[str, Market] = {US.key: US, INDIA.key: INDIA, INDIA_SME.key: INDIA_SME}
 
 # India large/mid/small is officially rank-based (SEBI): top 100 by market cap are
 # large, the next 150 mid, the rest small. We hold the whole Nifty Total Market

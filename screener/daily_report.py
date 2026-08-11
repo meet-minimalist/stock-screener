@@ -20,7 +20,7 @@ from screener.data.universe import get_ticker_list
 from screener.fundamentals import get_fundamentals
 from screener.markets import cap_classifier, get_market
 from screener.indicators.calculator import IndicatorCalculator
-from screener.scoring import ConvictionScorer
+from screener.scoring import ConvictionScorer, Gates
 from screener.records import StockRecord
 from screener.screeners.dual_momentum_rotation import (
     SIGNAL_KEY as DUAL_MOMENTUM_KEY,
@@ -85,6 +85,13 @@ def run_daily(
     sec_map = dict(zip(constituents["Symbol"], constituents["sector"]))
     price_sym = {t: t + mkt.ticker_suffix for t in tickers}
 
+    # India SME is priced with a mix of ``.NS`` (NSE Emerge) and ``.BO`` (BSE SME)
+    # symbols, resolved explicitly from the SME universe rather than a single suffix.
+    if mkt.key == "in_sme":
+        from screener.data.sme import sme_price_universe
+        _sme_t, _sme_sec, sme_price = sme_price_universe()
+        price_sym = {t: sme_price.get(t, t + mkt.ticker_suffix) for t in tickers}
+
     # Fold in BSE-exclusive names, priced via their ``.BO`` yfinance symbols. The
     # scorer's liquidity gate drops the illiquid ones, so only tradeable names score.
     if mkt.key == "in" and include_bse:
@@ -105,7 +112,10 @@ def run_daily(
 
     fetcher = DataFetcher(cache_dir=cache_dir)
     calc = IndicatorCalculator()
-    scorer = ConvictionScorer()
+    # SME turnover is structurally low, so the mainboard ₹50 lakh/day gate would empty
+    # the page; relax it to ₹10 lakh/day so genuinely dead names still drop out.
+    scorer = (ConvictionScorer(gates=Gates(min_dollar_vol=1_000_000.0, min_price=5.0))
+              if mkt.key == "in_sme" else ConvictionScorer())
 
     scored: list[dict] = []
     filtered = 0

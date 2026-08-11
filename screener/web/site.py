@@ -112,8 +112,11 @@ _PAGES = [
     ("us_fund", "🇺🇸 US Fundamentals", "fundamentals/"),
     ("in_daily", "🇮🇳 India Screener", "in/"),
     ("in_fund", "🇮🇳 India Fundamentals", "in/fundamentals/"),
+    ("in_sme_daily", "🇮🇳 India SME", "sme/"),
+    ("in_sme_fund", "🇮🇳 India SME Fundamentals", "sme/fundamentals/"),
 ]
-_DEPTH = {"us_daily": 0, "us_fund": 1, "in_daily": 1, "in_fund": 2}
+_DEPTH = {"us_daily": 0, "us_fund": 1, "in_daily": 1, "in_fund": 2,
+          "in_sme_daily": 1, "in_sme_fund": 2}
 
 
 def nav_html(current: str) -> str:
@@ -196,13 +199,25 @@ def conviction_methodology_html(currency: str = "$") -> str:
     )
 
 
+def sme_caveat_html(market: str) -> str:
+    """A risk banner shown only on the SME pages (kept separate from the mainboard)."""
+    if not str(market).startswith("in_sme"):
+        return ""
+    return ('<div style="margin:0 0 14px;padding:10px 14px;border:1px solid var(--line);'
+            'border-left:3px solid #b07400;border-radius:8px;background:rgba(176,116,0,.09);'
+            'font-size:.83rem;color:var(--ink2)">⚠️ <b>SME segment</b> — small/medium-enterprise '
+            'listings (NSE Emerge + BSE SME). Large lot sizes, thin liquidity and lighter '
+            'disclosure; more prone to sharp moves and manipulation. Kept entirely separate from '
+            'the mainboard screeners — treat as high-risk and do your own diligence.</div>')
+
+
 def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
     """Inner content for the daily technical screener site (market-aware)."""
     rows, screen_meta = _payload(result)
     market = result.get("market", "us")
     label = result.get("market_label", "US")
     currency = result.get("currency", "$")
-    benchmark = "Nifty" if market == "in" else "SPY"
+    benchmark = "Nifty" if str(market).startswith("in") else "SPY"
     best = max((r["score"] for r in rows if isinstance(r["score"], (int, float))), default=0)
     chips = "".join(
         f'<span class="chip">{html.escape(s)}</span>' for s in result.get("leading_sectors", [])
@@ -219,6 +234,7 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
     scored {result.get("scored", 0)} of {result.get("scanned", 0)}
     (filtered {result.get("filtered_out", 0)}) ·
     <a href="./fundamentals/">Fundamental screener →</a></div>
+  {sme_caveat_html(market)}
   <div class="tiles">
     <div class="tile"><div class="k">{result.get("scored", 0)}</div><div class="l">Passed gate</div></div>
     <div class="tile"><div class="k">{best:.0f}</div><div class="l">Best score</div></div>

@@ -20,10 +20,12 @@ def test_unknown_market_raises():
 def test_market_configs_are_coherent():
     for m in MARKETS.values():
         assert isinstance(m, Market)
-        assert m.benchmark and m.universe and m.sector_index
+        assert m.benchmark and m.universe
+        assert isinstance(m.sector_index, dict)   # may be empty (SME has no sector RRG)
     assert US.ticker_suffix == "" and US.currency == "$"
     assert INDIA.ticker_suffix == ".NS" and INDIA.currency == "₹"
     assert INDIA.benchmark == "^NSEI"
+    assert get_market("in_sme").universe == "india_sme"   # SME is its own universe
 
 
 def test_us_cap_tiers_use_absolute_usd_bands():
