@@ -21,8 +21,9 @@ def _fetch_in(**kwargs) -> dict[str, Fundamentals]:
     return screener_in_source.fetch(**kwargs)
 
 
-# market key -> source fetcher.
-_SOURCES = {"us": _fetch_us, "in": _fetch_in}
+# market key -> source fetcher. India SME uses the same screener.in source as the
+# India mainboard (its own universe/snapshot, same fetcher).
+_SOURCES = {"us": _fetch_us, "in": _fetch_in, "in_sme": _fetch_in}
 
 
 def refresh_market(market: str = "us", **source_kwargs) -> dict[str, Fundamentals]:

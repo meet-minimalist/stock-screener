@@ -59,6 +59,13 @@ def test_price_and_fundamentals_universes(monkeypatch):
     assert "METALIC" not in aliases       # NSE resolves by its own symbol
 
 
+def test_in_sme_has_a_fundamentals_source_registered():
+    # Regression: refresh_market("in_sme") must resolve to the screener.in source.
+    from screener.fundamentals import service
+    assert "in_sme" in service._SOURCES
+    assert service._SOURCES["in_sme"] is service._SOURCES["in"]
+
+
 def test_run_daily_sme_prices_names_by_their_own_yf_symbols(monkeypatch):
     """SME market must price NSE Emerge via .NS and BSE SME via .BO, from the SME map."""
     import screener.daily_report as dr
