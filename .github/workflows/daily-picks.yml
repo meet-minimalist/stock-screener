@@ -50,7 +50,7 @@ jobs:
         run: |
           python -m screener.daily_report --market us --universe sp1500 \
             --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
-            --top 30 --html ./_site/index.html
+            --top 30 --max-empty-rate 0.15 --html ./_site/index.html
           python -m screener.fundamental_screener --market us --html ./_site/fundamentals/index.html
       - name: Upload US site
         uses: actions/upload-artifact@v4
@@ -88,13 +88,13 @@ jobs:
         run: |
           python -m screener.daily_report --market in --universe nse_all \
             --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
-            --top 30 --html ./_site/in/index.html
+            --top 30 --max-empty-rate 0.15 --html ./_site/in/index.html
           python -m screener.fundamental_screener --market in --html ./_site/in/fundamentals/index.html
       - name: Build India SME pages
         run: |
           python -m screener.daily_report --market in_sme --universe india_sme \
             --start "${{ steps.dates.outputs.start }}" --end "${{ steps.dates.outputs.end }}" \
-            --top 30 --html ./_site/sme/index.html
+            --top 30 --max-empty-rate 1.0 --html ./_site/sme/index.html
           python -m screener.fundamental_screener --market in_sme --html ./_site/sme/fundamentals/index.html
       - name: Upload India site
         uses: actions/upload-artifact@v4

@@ -119,6 +119,7 @@ def run_daily(
 
     scored: list[dict] = []
     filtered = 0
+    empty = 0                                 # price fetch returned no data at all
     # Momentum for the cross-sectional rotation signal is a *market-specific* strategy:
     # quad-horizon over the whole US universe, dual-horizon over the NIFTY MidSmallcap
     # 400 for India. Collect it for every stock with enough history (not just the
@@ -140,6 +141,7 @@ def run_daily(
         # (``.NS`` for NSE, ``.BO`` for BSE-exclusive names).
         df = fetcher.get_data(price_sym[ticker], start_date, end_date, interval=interval)
         if df.empty:
+            empty += 1
             continue
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
                           macd_config=_MACD)
@@ -200,6 +202,7 @@ def run_daily(
         "scanned": len(tickers),
         "scored": len(scored),
         "filtered_out": filtered,
+        "empty_fetches": empty,
         "leading_sectors": leaders[:5],
         "rotation": rotation,
         "records": records,      # passing StockRecords + MidSmallcap portfolio names
@@ -261,12 +264,26 @@ def _attach_midsmall_portfolio(scored: list, member_closes: dict, sec_map: dict,
     return extra
 
 
+def empty_fetch_rate(result: dict) -> float:
+    """Share of the scanned universe whose price fetch returned no data at all.
+
+    A normal run is a few percent (genuinely delisted names). A spike means Yahoo
+    rate-limited the run, so good names are silently missing -- the signal the deploy
+    gate uses to refuse overwriting the last good build.
+    """
+    scanned = result.get("scanned") or 0
+    if not scanned:
+        return 0.0
+    return result.get("empty_fetches", 0) / scanned
+
+
 def format_report(result: dict) -> str:
     """Console/markdown-ish text report of the day's picks."""
     lines = [
         f"Daily Conviction Report — as of {result['as_of']}",
         f"Universe: {result['universe']}  |  scored {result['scored']} "
-        f"(filtered {result['filtered_out']}) of {result['scanned']}",
+        f"(filtered {result['filtered_out']}) of {result['scanned']}  |  "
+        f"empty fetches {result.get('empty_fetches', 0)} ({empty_fetch_rate(result):.1%})",
     ]
     if result["leading_sectors"]:
         lines.append("Sector tailwinds (Leading/Improving): "
@@ -318,6 +335,10 @@ def main():
                         help="Write a standalone HTML dashboard to this path (GitHub Pages)")
     parser.add_argument("--no-bse", action="store_true",
                         help="India only: exclude the BSE-exclusive names (NSE price universe only)")
+    parser.add_argument("--max-empty-rate", type=float, default=0.25,
+                        help="Exit non-zero (so CI skips deploy and keeps the last good "
+                             "build) if the share of empty price fetches exceeds this. "
+                             "Set to 1.0 to disable, e.g. for the thin SME universe.")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -362,6 +383,15 @@ def main():
         Path(args.html).parent.mkdir(parents=True, exist_ok=True)
         Path(args.html).write_text(page, encoding="utf-8")
         print(f"Saved HTML site to {args.html}")
+
+    # Fetch-health gate. A rate-limited run drops good names silently; failing here
+    # makes CI skip the deploy so a degraded build never overwrites the last good one.
+    rate = empty_fetch_rate(result)
+    if rate > args.max_empty_rate:
+        print(f"\nFETCH HEALTH GATE FAILED: {rate:.1%} of {result['scanned']} price "
+              f"fetches were empty (limit {args.max_empty_rate:.0%}). Refusing to "
+              f"publish a degraded build; keeping the last good deploy.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
