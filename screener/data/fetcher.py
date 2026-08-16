@@ -61,15 +61,17 @@ class DataFetcher:
         if not df.empty:
             return df
 
-        # Empty result. yf_cache re-downloads a month only when its file is *absent*,
-        # never when it exists-but-empty, so a broken/partial cached entry stays broken
-        # across runs (this is how good names like a fresh 52w-high breakout silently
-        # vanish from every build). Purge this ticker's cache to force a live re-fetch,
-        # then retry with backoff -- which also rides out transient rate-limit misses.
+        # Empty result. Only a broken *cached* entry is worth healing: yf_cache reloads
+        # an existing-but-empty month forever (this is how a fresh 52w-high breakout like
+        # FLUOROCHEM silently vanished from every build), so purge and re-fetch live. A
+        # symbol with no cache at all is either brand-new or -- far more often -- a
+        # dead/unlisted ticker (e.g. MCCHRLS-B.NS); retrying it only multiplies Yahoo's
+        # per-month "data doesn't exist" errors, so leave it alone.
         tdir = os.path.join(self._cache_dir, ticker)
-        if os.path.isdir(tdir):
-            shutil.rmtree(tdir, ignore_errors=True)
-            logger.info("Purged stale/empty cache for %s; forcing live re-fetch", ticker)
+        if not os.path.isdir(tdir):
+            return df
+        shutil.rmtree(tdir, ignore_errors=True)
+        logger.info("Purged stale/empty cache for %s; forcing live re-fetch", ticker)
 
         for attempt in range(self._retries):
             _sleep(_BACKOFF_BASE * (2 ** attempt))

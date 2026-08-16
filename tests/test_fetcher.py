@@ -43,22 +43,7 @@ def _fetcher(monkeypatch, sequence, retries=2, cache_dir="nope"):
     return f
 
 
-def test_retries_recover_after_transient_empty(monkeypatch):
-    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
-    f = _fetcher(monkeypatch, [pd.DataFrame(), _frame([1.0, 2.0])])
-    out = f.get_data("AAA", "2026-01-01", "2026-02-01")
-    assert not out.empty and f._downloader.calls == 2
-
-
-def test_gives_up_and_returns_empty_after_retries(monkeypatch):
-    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
-    f = _fetcher(monkeypatch, [pd.DataFrame()], retries=2)
-    out = f.get_data("AAA", "2026-01-01", "2026-02-01")
-    assert out.empty
-    assert f._downloader.calls == 3               # 1 initial + 2 retries
-
-
-def test_empty_purges_broken_cache_then_refetches(monkeypatch, tmp_path):
+def test_broken_cache_purged_then_refetched(monkeypatch, tmp_path):
     # A broken cached entry: the dir exists but the fetch is empty until purged.
     monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
     tdir = tmp_path / "BROKEN.NS"
@@ -69,6 +54,28 @@ def test_empty_purges_broken_cache_then_refetches(monkeypatch, tmp_path):
     out = f.get_data("BROKEN.NS", "2026-01-01", "2026-08-17")
     assert not out.empty
     assert not tdir.exists()                        # cache was purged to force re-fetch
+    assert f._downloader.calls == 2                 # 1 initial + 1 recovering retry
+
+
+def test_dead_symbol_without_cache_is_not_retried(monkeypatch, tmp_path):
+    # No cache dir -> a dead/unlisted symbol; must NOT retry (that only spams Yahoo).
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    f = _fetcher(monkeypatch, [pd.DataFrame()], cache_dir=str(tmp_path))
+    out = f.get_data("DEAD.NS", "2026-01-01", "2026-02-01")
+    assert out.empty
+    assert f._downloader.calls == 1                 # single attempt, no retries
+
+
+def test_broken_cache_gives_up_after_retries(monkeypatch, tmp_path):
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    tdir = tmp_path / "BROKEN.NS"
+    tdir.mkdir()
+    (tdir / "2026-08.csv").write_text("")
+    f = _fetcher(monkeypatch, [pd.DataFrame()], retries=2, cache_dir=str(tmp_path))
+    out = f.get_data("BROKEN.NS", "2026-01-01", "2026-08-17")
+    assert out.empty
+    assert f._downloader.calls == 3                 # 1 initial + 2 retries
+    assert not tdir.exists()
 
 
 def test_empty_fetch_rate():
@@ -78,16 +85,18 @@ def test_empty_fetch_rate():
     assert empty_fetch_rate({"scanned": 10}) == 0.0        # key absent -> 0
 
 
-def test_exception_is_swallowed_and_retried(monkeypatch):
+def test_exception_is_swallowed_and_retried(monkeypatch, tmp_path):
     class _Boom(_FakeDownloader):
         def get_data(self, *a, **k):
             self.calls += 1
             if self.calls == 1:
-                raise RuntimeError("rate limited")
+                raise RuntimeError("rate limited")   # must not propagate
             return _frame([9.0])
 
     monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _Boom)
     monkeypatch.setattr(fetcher_mod, "_sleep", lambda *_: None)
-    f = DataFetcher(cache_dir="nope", retries=2)
+    (tmp_path / "AAA").mkdir()                        # broken cache -> retry path engages
+    (tmp_path / "AAA" / "m.csv").write_text("")
+    f = DataFetcher(cache_dir=str(tmp_path), retries=2)
     out = f.get_data("AAA", "2026-01-01", "2026-02-01")
     assert not out.empty and f._downloader.calls == 2

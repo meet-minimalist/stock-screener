@@ -351,6 +351,12 @@ def main():
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(levelname)s | %(name)s | %(message)s",
     )
+    if not args.verbose:
+        # yfinance logs an ERROR per missing month for every dead/unlisted symbol
+        # (e.g. MCCHRLS-B.NS emits a line per month of the window). The fetch layer
+        # already handles empty results and the health gate tracks them, so keep that
+        # non-actionable chatter out of the build log unless explicitly debugging.
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
     config = ScreenConfig.from_yaml(args.config)
     start = args.start or config.start_date
