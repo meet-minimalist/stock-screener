@@ -93,16 +93,50 @@ def test_degraded_fetch_rate_counts_empty_and_stale():
     assert degraded_fetch_rate({"scanned": 0}) == 0.0
 
 
-def test_missing_month_noise_filter():
+def test_log_tap_drops_noise_and_counts_rate_limits():
     import logging
-    from screener.daily_report import _DropMissingMonthNoise
-    f = _DropMissingMonthNoise()
+    f = fetcher_mod._YFCacheLogTap()
 
     def rec(msg):
         return logging.LogRecord("yf_cache.downloader", logging.ERROR, __file__, 1, msg, None, None)
 
+    before = fetcher_mod.rate_limit_hits
     assert f.filter(rec("MCCHRLS-B.NS: Data doesn't exist for startDate = 1")) is False
-    assert f.filter(rec("Error downloading MCCHRLS-B.NS: Too Many Requests. Rate limited.")) is True
+    assert f.filter(rec("Error downloading KPL.NS: Too Many Requests. Rate limited.")) is False
+    assert fetcher_mod.rate_limit_hits == before + 1        # rate limit counted
+    assert f.filter(rec("Saved KPL.NS to cache")) is True   # unrelated lines pass
+
+
+def test_rate_limit_backs_off_then_recovers(monkeypatch):
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    monkeypatch.setattr(fetcher_mod, "_sleep", lambda *_: None)
+    f = DataFetcher(cache_dir="nope", rl_retries=3)
+    calls = {"n": 0}
+
+    def dl(ticker, s, e, interval="1d"):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            fetcher_mod.rate_limit_hits += 1     # simulate a 429 the tap would count
+            return pd.DataFrame()
+        return _frame([10.0, 11.0])
+
+    f._downloader.get_data = dl
+    out = f.get_data("KPL.NS", "2025-01-01", "2026-01-01")
+    assert not out.empty and calls["n"] == 2     # backed off once, then recovered
+
+
+def test_rate_limit_gives_up_after_rl_retries(monkeypatch):
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    monkeypatch.setattr(fetcher_mod, "_sleep", lambda *_: None)
+    f = DataFetcher(cache_dir="nope", rl_retries=2)
+
+    def dl(ticker, s, e, interval="1d"):
+        fetcher_mod.rate_limit_hits += 1         # always throttled
+        return pd.DataFrame()
+
+    f._downloader.get_data = dl
+    out = f.get_data("KPL.NS", "2025-01-01", "2026-01-01")
+    assert out.empty                             # no cache dir -> no further purge retry
 
 
 def test_exception_is_swallowed_and_retried(monkeypatch, tmp_path):

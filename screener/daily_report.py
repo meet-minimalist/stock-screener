@@ -47,14 +47,6 @@ logger = logging.getLogger(__name__)
 # a stale fetch -- the signature of a rate-limited run that served old cached months.
 _STALE_DAYS = 6
 
-
-class _DropMissingMonthNoise(logging.Filter):
-    """Silence yf_cache's benign per-month "Data doesn't exist" lines (emitted for
-    every pre-listing month of a new listing) while letting rate-limit lines through."""
-
-    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
-        return "Data doesn't exist" not in record.getMessage()
-
 _MACD = {"fast": 12, "slow": 26, "signal": 9}
 
 
@@ -138,6 +130,8 @@ def run_daily(
     filtered = 0
     empty = 0                                 # price fetch returned no data at all
     fetch_last: list = []                     # last bar date per non-empty fetch (staleness)
+    from screener.data import fetcher as _fetcher_mod
+    rl_before = _fetcher_mod.rate_limit_hits   # Yahoo throttle events during this run
     # Momentum for the cross-sectional rotation signal is a *market-specific* strategy:
     # quad-horizon over the whole US universe, dual-horizon over the NIFTY MidSmallcap
     # 400 for India. Collect it for every stock with enough history (not just the
@@ -233,6 +227,7 @@ def run_daily(
         "filtered_out": filtered,
         "empty_fetches": empty,
         "stale_fetches": stale,
+        "rate_limit_hits": _fetcher_mod.rate_limit_hits - rl_before,
         "leading_sectors": leaders[:5],
         "rotation": rotation,
         "records": records,      # passing StockRecords + MidSmallcap portfolio names
@@ -326,7 +321,8 @@ def format_report(result: dict) -> str:
         f"Universe: {result['universe']}  |  scored {result['scored']} "
         f"(filtered {result['filtered_out']}) of {result['scanned']}  |  "
         f"empty {result.get('empty_fetches', 0)} + stale {result.get('stale_fetches', 0)} "
-        f"= degraded {degraded_fetch_rate(result):.1%}",
+        f"= degraded {degraded_fetch_rate(result):.1%}"
+        f"  |  rate-limit hits {result.get('rate_limit_hits', 0)}",
     ]
     if result["leading_sectors"]:
         lines.append("Sector tailwinds (Leading/Improving): "
@@ -400,10 +396,9 @@ def main():
         # already handles empty results and the health gate tracks them, so keep that
         # non-actionable chatter out of the build log unless explicitly debugging.
         logging.getLogger("yfinance").setLevel(logging.CRITICAL)
-        # yf_cache logs a benign "Data doesn't exist" per pre-listing month for every
-        # newly-listed name -- drop those, but KEEP rate-limit lines visible, since a
-        # throttled run is a real signal (and the staleness gate acts on its damage).
-        logging.getLogger("yf_cache.downloader").addFilter(_DropMissingMonthNoise())
+    # yf_cache.downloader noise (benign "Data doesn't exist", per-month rate-limit spam)
+    # is tamed by a filter installed in screener.data.fetcher on import; the fetcher backs
+    # off and retries throttled names, and reports the total in the run summary.
 
     config = ScreenConfig.from_yaml(args.config)
     start = args.start or config.start_date
