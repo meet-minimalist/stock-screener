@@ -15,6 +15,10 @@ class StockRecord:
     score: float | None = None
     filtered: bool = False
     filter_reason: str | None = None
+    # Non-empty when the stock is scored but WOULD fail a (soft) fundamental gate,
+    # e.g. "P/E 84 > 80". Lets the page hide/show gated names via a toggle instead of
+    # dropping them outright, so technical screens can still surface richly-valued names.
+    fund_gate: str = ""
 
     # Price / technical context.
     price: float | None = None

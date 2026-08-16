@@ -76,3 +76,25 @@ def test_scorer_includes_fundamentals_and_gates():
     hi = scorer.score("AAA", "Information Technology", df, ctx, fund=good).score
     lo = scorer.score("AAA", "Information Technology", df, ctx, fund=weak).score
     assert hi > lo
+
+
+def test_soft_fundamental_scores_gated_names_and_flags_them():
+    """soft_fundamental keeps a gate-failing name in the results, scored + flagged,
+    so the page's toggle can reveal it. The liquidity gate stays hard."""
+    df = _synthetic_df()
+    ctx = {"Information Technology": {"quadrant": "Leading", "etf": "XLK", "ret_3m": 5.0}}
+    soft = ConvictionScorer(soft_fundamental=True)
+
+    # High P/E: hard gate would drop it; soft gate scores it and records the reason.
+    res = soft.score("HIP", "Information Technology", df, ctx, fund=_fund(pe=120))
+    assert res.score is not None and not res.filtered
+    assert res.fund_gate and "P/E" in res.fund_gate
+
+    # A clean name carries no gate flag.
+    ok = soft.score("OK", "Information Technology", df, ctx, fund=_fund(pe=22, roe=20))
+    assert ok.score is not None and ok.fund_gate == ""
+
+    # Liquidity gate is unaffected by soft mode -> still a hard drop.
+    thin = df.copy(); thin["Volume"] = 1.0
+    gated = soft.score("THIN", "Information Technology", thin, ctx, fund=_fund(pe=22))
+    assert gated.score is None and gated.filtered

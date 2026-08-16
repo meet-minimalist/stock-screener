@@ -85,6 +85,26 @@ def test_empty_fetch_rate():
     assert empty_fetch_rate({"scanned": 10}) == 0.0        # key absent -> 0
 
 
+def test_degraded_fetch_rate_counts_empty_and_stale():
+    from screener.daily_report import degraded_fetch_rate
+    # 10 empty + 15 stale of 100 = 25% degraded (empty rate alone would miss the stale).
+    assert degraded_fetch_rate({"scanned": 100, "empty_fetches": 10, "stale_fetches": 15}) == 0.25
+    assert degraded_fetch_rate({"scanned": 100, "empty_fetches": 0, "stale_fetches": 30}) == 0.30
+    assert degraded_fetch_rate({"scanned": 0}) == 0.0
+
+
+def test_missing_month_noise_filter():
+    import logging
+    from screener.daily_report import _DropMissingMonthNoise
+    f = _DropMissingMonthNoise()
+
+    def rec(msg):
+        return logging.LogRecord("yf_cache.downloader", logging.ERROR, __file__, 1, msg, None, None)
+
+    assert f.filter(rec("MCCHRLS-B.NS: Data doesn't exist for startDate = 1")) is False
+    assert f.filter(rec("Error downloading MCCHRLS-B.NS: Too Many Requests. Rate limited.")) is True
+
+
 def test_exception_is_swallowed_and_retried(monkeypatch, tmp_path):
     class _Boom(_FakeDownloader):
         def get_data(self, *a, **k):

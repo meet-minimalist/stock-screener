@@ -4,6 +4,7 @@ import html
 import json
 from typing import Any
 
+from screener.scoring import Gates
 from screener.screens import SCREENS, apply_screen
 from screener.web.assets import SCRIPT, STYLE
 
@@ -73,7 +74,8 @@ _RECORD_FIELDS = ["ticker", "sector", "cap_tier", "score", "price", "market_cap"
                   "ret_3m", "ret_6m", "ret_12m", "rel_sector_3m", "momentum",
                   "entry_price", "entry_date", "days_held", "stop_loss", "pl_pct",
                   "exit_reason", "days_ago",
-                  "pe", "roe", "eps_growth", "debt_equity", "factors", "reason", "signal_notes"]
+                  "pe", "roe", "eps_growth", "debt_equity", "fund_gate",
+                  "factors", "reason", "signal_notes"]
 
 
 def _payload(result: dict) -> tuple[list[dict], list[dict]]:
@@ -132,12 +134,23 @@ def nav_html(current: str) -> str:
 
 def render_screener_body(header_html: str, rows: list[dict],
                          screen_meta: list[dict], columns: list[dict],
-                         score_label: str = "Min score", currency: str = "$") -> str:
+                         score_label: str = "Min score", currency: str = "$",
+                         gate_toggles: bool = False) -> str:
     """Generic interactive screener body: a header block + tabbed sortable tables.
 
     Reused by both the daily site and the fundamental screener — only the header,
     records, screens, and columns differ. No <html>/<head>/<body> (Artifact-ready).
+    ``gate_toggles`` adds the fundamental-gate filter checkboxes (daily page only).
     """
+    _g = Gates()
+    gate_html = f"""
+    <span class="gates" id="gates" title="Fundamental filters. Off = also show names that fail the gate (e.g. a high-P/E breakout leader). Missing data always passes.">
+      <label><input type="checkbox" id="g_pe" checked> Hide P/E &gt; {_g.max_pe:.0f}</label>
+      <label><input type="checkbox" id="g_de" checked> Hide D/E &gt; {_g.max_debt_equity:.1f}</label>
+      <label><input type="checkbox" id="g_neg" checked> Hide losses</label>
+    </span>""" if gate_toggles else ""
+    gates_const = (f"const GATES = {{max_pe: {_g.max_pe}, max_de: {_g.max_debt_equity}}};"
+                   if gate_toggles else "")
     return f"""
 <style>{STYLE}</style>
 <div class="app">
@@ -149,7 +162,7 @@ def render_screener_body(header_html: str, rows: list[dict],
     <input type="search" id="search" placeholder="Search ticker or sector…" aria-label="Search">
     <select id="sector" aria-label="Filter by sector"><option value="">All sectors</option></select>
     <label>{html.escape(score_label)} <input type="range" id="minscore" min="0" max="100" value="0" step="5">
-      <span id="minscoreval">0</span></label>
+      <span id="minscoreval">0</span></label>{gate_html}
     <span class="spacer"></span>
     <span class="count" id="count"></span>
     <button class="btn" id="export" type="button">Export CSV</button>
@@ -164,6 +177,7 @@ const CURRENCY = {_json_for_html(currency)};
 const RECORDS = {_json_for_html(rows)};
 const SCREENS = {_json_for_html(screen_meta)};
 const COLUMNS = {_json_for_html(columns)};
+{gates_const}
 </script>
 <script>{SCRIPT}</script>
 """
@@ -244,7 +258,8 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
   <div class="chips"><b style="color:var(--muted)">SECTOR TAILWINDS&nbsp;&nbsp;</b>{chips}</div>
   {conviction_methodology_html(currency)}
   {rrg_block}"""
-    return render_screener_body(header, rows, screen_meta, COLUMNS, currency=currency)
+    return render_screener_body(header, rows, screen_meta, COLUMNS, currency=currency,
+                                gate_toggles=True)
 
 
 def wrap_page(body: str, title: str = "Daily Stock Screener") -> str:

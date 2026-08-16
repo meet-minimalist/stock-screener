@@ -181,10 +181,14 @@ class ConvictionScorer:
     """Blend the screeners into one 0-100 Daily Conviction Score per stock."""
 
     def __init__(self, weights: dict | None = None, gates: Gates | None = None,
-                 vol_window: int = 63):
+                 vol_window: int = 63, soft_fundamental: bool = False):
         self.weights = weights or DEFAULT_WEIGHTS
         self.gates = gates or Gates()
         self.vol_window = vol_window
+        # When True, a fundamental-gate failure no longer drops the stock: it is scored
+        # as usual and the reason is recorded on ``fund_gate`` so the page can hide/show
+        # it with a toggle. The liquidity gate stays hard either way.
+        self.soft_fundamental = soft_fundamental
 
     def score(self, ticker: str, sector: str | None, df: pd.DataFrame,
               sector_ctx: dict[str, dict], fund=None) -> StockRecord | None:
@@ -203,9 +207,12 @@ class ConvictionScorer:
                                filter_reason=gate_reason, reason=f"filtered: {gate_reason}")
 
         fund_ok, fund_reason = _fundamental_gate(fund, self.gates)
-        if not fund_ok:
+        if not fund_ok and not self.soft_fundamental:
             return StockRecord(ticker=ticker, sector=sector, filtered=True,
                                filter_reason=fund_reason, reason=f"filtered: {fund_reason}")
+        # In soft mode we keep scoring; the failing reason (if any) is stamped below so
+        # the page can filter these names in/out on demand.
+        soft_gate = "" if fund_ok else fund_reason
 
         close = df["Close"]
         price = float(close.iloc[-1])
@@ -255,6 +262,7 @@ class ConvictionScorer:
             market_cap=getattr(fund, "market_cap", None),
             factors={k: round(v, 2) for k, v in factors.items()},
             triggers=fired,
+            fund_gate=soft_gate,
             reason=self._reason(quadrant, r12, r3, sector_r3, fired, fund),
         )
 

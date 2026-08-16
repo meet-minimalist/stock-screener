@@ -59,6 +59,10 @@ details.method li b { color:var(--ink); }
   border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:.85rem; font-family:inherit; }
 .controls input[type="search"] { min-width:180px; }
 .controls label { font-size:.78rem; color:var(--muted); display:inline-flex; gap:6px; align-items:center; }
+.controls .gates { display:inline-flex; flex-wrap:wrap; gap:12px; align-items:center; padding-left:12px;
+  border-left:1px solid var(--line); cursor:help; }
+.controls .gates label { cursor:pointer; }
+.controls .gates input { accent-color:var(--accent); }
 .controls .spacer { flex:1; }
 .btn { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:7px 12px; font-size:.82rem;
   cursor:pointer; font-family:inherit; }
@@ -104,7 +108,9 @@ tbody tr:hover { background:var(--line2); }
 # membership) and only filters/sorts/renders here.
 SCRIPT = r"""
 (function () {
-  var state = { tab: SCREENS[0].key, q: "", sector: "", minScore: 0, sortKey: null, sortDir: -1 };
+  var state = { tab: SCREENS[0].key, q: "", sector: "", minScore: 0, sortKey: null, sortDir: -1,
+                hidePe: true, hideDe: true, hideNeg: true };
+  var HAS_GATES = (typeof GATES !== "undefined");
   var FCOLORS = { sector:"#2a78d6", trend:"#1baf7a", rel_strength:"#eda100",
                   volatility:"#4a3aa7", trigger:"#eb6834", fundamental:"#e34948" };
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -144,10 +150,29 @@ SCRIPT = r"""
     }
   }
 
+  // Fundamental gates as a live filter (default: hide names that fail, matching the
+  // old hard-gated view). Missing data always passes -- a name with no P/E is never hidden.
+  function passesGates(r) {
+    if (!HAS_GATES) return true;
+    var pe = num(r.pe), de = num(r.debt_equity);
+    if (state.hidePe && pe !== null && pe > GATES.max_pe) return false;
+    if (state.hideNeg && pe !== null && pe < 0) return false;
+    if (state.hideDe && de !== null && de > GATES.max_de) return false;
+    return true;
+  }
+
+  function screenCount(key) {
+    var n = 0;
+    for (var i=0;i<RECORDS.length;i++){ var r=RECORDS[i];
+      if (r.screens.indexOf(key) >= 0 && passesGates(r)) n++; }
+    return n;
+  }
+
   function currentRows() {
     var q = state.q.toLowerCase();
     var rows = RECORDS.filter(function (r) {
       if (r.screens.indexOf(state.tab) < 0) return false;
+      if (!passesGates(r)) return false;
       if (state.sector && r.sector !== state.sector) return false;
       if (num(r.score) !== null && r.score < state.minScore) return false;
       if (q && (r.ticker.toLowerCase().indexOf(q) < 0) && ((r.sector||"").toLowerCase().indexOf(q) < 0)) return false;
@@ -186,6 +211,7 @@ SCRIPT = r"""
     $("#tabdesc").textContent = sc.description;
     document.querySelectorAll(".tab").forEach(function (t) {
       t.setAttribute("aria-selected", t.dataset.key === state.tab ? "true" : "false");
+      var n = t.querySelector(".n"); if (n) n.textContent = screenCount(t.dataset.key);
     });
     var rows = currentRows();
     $("#count").textContent = rows.length + " stocks";
@@ -249,6 +275,12 @@ SCRIPT = r"""
     var slider = $("#minscore");
     slider.addEventListener("input", function (e) { state.minScore = +e.target.value; $("#minscoreval").textContent = e.target.value; render(); });
     $("#export").addEventListener("click", toCsv);
+    if (HAS_GATES) {
+      [["#g_pe","hidePe"],["#g_de","hideDe"],["#g_neg","hideNeg"]].forEach(function (p) {
+        var el = $(p[0]);
+        if (el) el.addEventListener("change", function (e) { state[p[1]] = e.target.checked; render(); });
+      });
+    }
     $("#thead").addEventListener("click", function (e) {
       var th = e.target.closest("th"); if (!th) return; var key = th.dataset.key;
       var col = COLUMNS.filter(function(c){return c.key===key;})[0]; if (!col || col.sortable===false) return;

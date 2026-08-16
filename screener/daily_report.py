@@ -43,6 +43,18 @@ from screener.signals import compute_signals
 
 logger = logging.getLogger(__name__)
 
+# Trailing bar older than this (calendar days) behind the run's freshest bar counts as
+# a stale fetch -- the signature of a rate-limited run that served old cached months.
+_STALE_DAYS = 6
+
+
+class _DropMissingMonthNoise(logging.Filter):
+    """Silence yf_cache's benign per-month "Data doesn't exist" lines (emitted for
+    every pre-listing month of a new listing) while letting rate-limit lines through."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        return "Data doesn't exist" not in record.getMessage()
+
 _MACD = {"fast": 12, "slow": 26, "signal": 9}
 
 
@@ -114,12 +126,18 @@ def run_daily(
     calc = IndicatorCalculator()
     # SME turnover is structurally low, so the mainboard ₹50 lakh/day gate would empty
     # the page; relax it to ₹10 lakh/day so genuinely dead names still drop out.
-    scorer = (ConvictionScorer(gates=Gates(min_dollar_vol=1_000_000.0, min_price=5.0))
-              if mkt.key == "in_sme" else ConvictionScorer())
+    # soft_fundamental: keep richly-valued/levered names in the results (scored, but
+    # flagged) so the page's gate toggles can reveal them -- a breakout screen should be
+    # able to show a high-P/E leader. The liquidity gate stays hard.
+    scorer = (ConvictionScorer(gates=Gates(min_dollar_vol=1_000_000.0, min_price=5.0),
+                               soft_fundamental=True)
+              if mkt.key == "in_sme"
+              else ConvictionScorer(soft_fundamental=True))
 
     scored: list[dict] = []
     filtered = 0
     empty = 0                                 # price fetch returned no data at all
+    fetch_last: list = []                     # last bar date per non-empty fetch (staleness)
     # Momentum for the cross-sectional rotation signal is a *market-specific* strategy:
     # quad-horizon over the whole US universe, dual-horizon over the NIFTY MidSmallcap
     # 400 for India. Collect it for every stock with enough history (not just the
@@ -143,6 +161,10 @@ def run_daily(
         if df.empty:
             empty += 1
             continue
+        try:
+            fetch_last.append(df.index[-1])
+        except (IndexError, AttributeError):
+            pass
         df = calc.compute(df, sma_periods=[20, 50, 200], rsi_periods=[14],
                           macd_config=_MACD)
         if compute_mom is not None:
@@ -188,6 +210,13 @@ def run_daily(
     for res in scored:
         res.cap_tier = classify(res.market_cap)
 
+    # Staleness: rate-limited runs serve old cached months, so the trailing bar lags the
+    # run's freshest bar. A run where many names are stale is degraded even with 0 empties.
+    stale = 0
+    if fetch_last:
+        fresh = max(fetch_last)
+        stale = sum(1 for d in fetch_last if (fresh - d).days > _STALE_DAYS)
+
     ranked = sorted(scored, key=lambda r: r.score, reverse=True)
     records = ranked + extra_records          # extra = MidSmallcap names below the gate
     leaders = [r["sector"] for _, r in rotation.iterrows()
@@ -203,6 +232,7 @@ def run_daily(
         "scored": len(scored),
         "filtered_out": filtered,
         "empty_fetches": empty,
+        "stale_fetches": stale,
         "leading_sectors": leaders[:5],
         "rotation": rotation,
         "records": records,      # passing StockRecords + MidSmallcap portfolio names
@@ -277,13 +307,26 @@ def empty_fetch_rate(result: dict) -> float:
     return result.get("empty_fetches", 0) / scanned
 
 
+def degraded_fetch_rate(result: dict) -> float:
+    """Share of the universe with no data OR stale (old cached) data.
+
+    Broader than the empty rate: a rate-limited run returns stale-but-nonempty frames,
+    which the empty rate misses. This is what the deploy gate acts on.
+    """
+    scanned = result.get("scanned") or 0
+    if not scanned:
+        return 0.0
+    return (result.get("empty_fetches", 0) + result.get("stale_fetches", 0)) / scanned
+
+
 def format_report(result: dict) -> str:
     """Console/markdown-ish text report of the day's picks."""
     lines = [
         f"Daily Conviction Report — as of {result['as_of']}",
         f"Universe: {result['universe']}  |  scored {result['scored']} "
         f"(filtered {result['filtered_out']}) of {result['scanned']}  |  "
-        f"empty fetches {result.get('empty_fetches', 0)} ({empty_fetch_rate(result):.1%})",
+        f"empty {result.get('empty_fetches', 0)} + stale {result.get('stale_fetches', 0)} "
+        f"= degraded {degraded_fetch_rate(result):.1%}",
     ]
     if result["leading_sectors"]:
         lines.append("Sector tailwinds (Leading/Improving): "
@@ -337,8 +380,8 @@ def main():
                         help="India only: exclude the BSE-exclusive names (NSE price universe only)")
     parser.add_argument("--max-empty-rate", type=float, default=0.25,
                         help="Exit non-zero (so CI skips deploy and keeps the last good "
-                             "build) if the share of empty price fetches exceeds this. "
-                             "Set to 1.0 to disable, e.g. for the thin SME universe.")
+                             "build) if the share of empty OR stale price fetches exceeds "
+                             "this. Set to 1.0 to disable, e.g. for the thin SME universe.")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -357,6 +400,10 @@ def main():
         # already handles empty results and the health gate tracks them, so keep that
         # non-actionable chatter out of the build log unless explicitly debugging.
         logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        # yf_cache logs a benign "Data doesn't exist" per pre-listing month for every
+        # newly-listed name -- drop those, but KEEP rate-limit lines visible, since a
+        # throttled run is a real signal (and the staleness gate acts on its damage).
+        logging.getLogger("yf_cache.downloader").addFilter(_DropMissingMonthNoise())
 
     config = ScreenConfig.from_yaml(args.config)
     start = args.start or config.start_date
@@ -390,13 +437,15 @@ def main():
         Path(args.html).write_text(page, encoding="utf-8")
         print(f"Saved HTML site to {args.html}")
 
-    # Fetch-health gate. A rate-limited run drops good names silently; failing here
-    # makes CI skip the deploy so a degraded build never overwrites the last good one.
-    rate = empty_fetch_rate(result)
+    # Fetch-health gate. A rate-limited run silently drops good names (empty fetch) or
+    # serves stale cached data; failing here makes CI skip the deploy so a degraded build
+    # never overwrites the last good one.
+    rate = degraded_fetch_rate(result)
     if rate > args.max_empty_rate:
         print(f"\nFETCH HEALTH GATE FAILED: {rate:.1%} of {result['scanned']} price "
-              f"fetches were empty (limit {args.max_empty_rate:.0%}). Refusing to "
-              f"publish a degraded build; keeping the last good deploy.")
+              f"fetches were empty or stale (empty {result.get('empty_fetches', 0)}, "
+              f"stale {result.get('stale_fetches', 0)}; limit {args.max_empty_rate:.0%}). "
+              f"Refusing to publish a degraded build; keeping the last good deploy.")
         sys.exit(1)
 
 
