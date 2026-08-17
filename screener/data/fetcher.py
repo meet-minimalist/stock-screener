@@ -17,10 +17,18 @@ _BACKOFF_BASE = float(os.getenv("YF_FETCH_BACKOFF", "0.5"))
 _RL_RETRIES = int(os.getenv("YF_RL_RETRIES", "3"))
 _RL_BASE = float(os.getenv("YF_RL_BACKOFF", "5"))
 _RL_CAP = float(os.getenv("YF_RL_BACKOFF_CAP", "30"))
+# Global cap on TOTAL seconds a process spends in rate-limit backoff. Per-ticker backoff
+# doesn't scale when much of the universe is throttled at once (thousands of names each
+# sleeping -> multi-hour build). Once this budget is spent, stop backing off and let the
+# names come back empty/stale; the cache keeps whatever downloaded, the next run continues
+# the heal with a fresh budget, and the health gate holds the deploy until it's whole.
+_RL_BUDGET = float(os.getenv("YF_RL_BUDGET", "300"))  # 5 min
 
 # Incremented by the log tap below whenever yf_cache reports a Yahoo rate limit. The
 # fetcher reads its delta to tell a throttled fetch apart from a genuinely-empty one.
 rate_limit_hits = 0
+# Total seconds this process has spent sleeping in rate-limit backoff (budget guard).
+rl_backoff_spent = 0.0
 
 
 class _YFCacheLogTap(logging.Filter):
@@ -102,12 +110,14 @@ class DataFetcher:
         # usual trigger). yf_cache does NOT cache the failed months, so waiting for the
         # limit to reset and retrying the whole ticker recovers its data -- and the
         # escalating backoff paces the run so the throttling subsides.
+        global rl_backoff_spent
         n = 0
-        while df.empty and limited and n < self._rl_retries:
+        while df.empty and limited and n < self._rl_retries and rl_backoff_spent < _RL_BUDGET:
             wait = min(_RL_BASE * (2 ** n), _RL_CAP)
             logger.warning("Rate limited on %s; backing off %.0fs (retry %d/%d)",
                            ticker, wait, n + 1, self._rl_retries)
             _sleep(wait)
+            rl_backoff_spent += wait
             df, limited = self._attempt(ticker, start_date, end_date, interval)
             n += 1
         if not df.empty:

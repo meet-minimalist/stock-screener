@@ -3,8 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+import pytest
+
 from screener.data import fetcher as fetcher_mod
 from screener.data.fetcher import DataFetcher, _clean
+
+
+@pytest.fixture(autouse=True)
+def _reset_backoff_budget():
+    fetcher_mod.rl_backoff_spent = 0.0     # isolate the process-wide backoff budget
+    yield
 
 
 def _frame(closes):
@@ -123,6 +131,27 @@ def test_rate_limit_backs_off_then_recovers(monkeypatch):
     f._downloader.get_data = dl
     out = f.get_data("KPL.NS", "2025-01-01", "2026-01-01")
     assert not out.empty and calls["n"] == 2     # backed off once, then recovered
+
+
+def test_rate_limit_backoff_respects_global_budget(monkeypatch):
+    # Once the process-wide backoff budget is spent, throttled fetches stop sleeping
+    # and return fast, so a fully-throttled universe can't produce a multi-hour build.
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    slept = []
+    monkeypatch.setattr(fetcher_mod, "_sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(fetcher_mod, "_RL_BUDGET", 12.0)     # tiny budget for the test
+    monkeypatch.setattr(fetcher_mod, "rl_backoff_spent", 0.0)
+
+    def dl(ticker, s, e, interval="1d"):
+        fetcher_mod.rate_limit_hits += 1
+        return pd.DataFrame()                                # always throttled
+
+    # Fetch several throttled tickers; total sleep must not exceed the budget by much.
+    for i in range(20):
+        f = DataFetcher(cache_dir="nope", rl_retries=3)
+        f._downloader.get_data = dl
+        f.get_data("T%d.NS" % i, "2025-01-01", "2026-01-01")
+    assert sum(slept) <= 12.0 + fetcher_mod._RL_CAP          # bounded, not 20*35s
 
 
 def test_rate_limit_gives_up_after_rl_retries(monkeypatch):

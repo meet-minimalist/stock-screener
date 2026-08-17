@@ -132,6 +132,7 @@ def run_daily(
     fetch_last: list = []                     # last bar date per non-empty fetch (staleness)
     from screener.data import fetcher as _fetcher_mod
     rl_before = _fetcher_mod.rate_limit_hits   # Yahoo throttle events during this run
+    _fetcher_mod.rl_backoff_spent = 0.0        # fresh rate-limit backoff budget per run
     # Momentum for the cross-sectional rotation signal is a *market-specific* strategy:
     # quad-horizon over the whole US universe, dual-horizon over the NIFTY MidSmallcap
     # 400 for India. Collect it for every stock with enough history (not just the
