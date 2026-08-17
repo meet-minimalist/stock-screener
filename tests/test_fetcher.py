@@ -107,12 +107,20 @@ def test_log_tap_drops_noise_and_counts_rate_limits():
     assert f.filter(rec("Saved KPL.NS to cache")) is True   # unrelated lines pass
 
 
+def _age(path, seconds):
+    import os
+    import time as _t
+    t = _t.time() - seconds
+    os.utime(path, (t, t))
+
+
 def test_refresh_recent_months_deletes_only_trailing(monkeypatch, tmp_path):
     monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
     d = tmp_path / "AAA.NS" / "1d"
     d.mkdir(parents=True)
     for name in ["2026-01.csv", "2026-07.csv", "2026-08.csv"]:
         (d / name).write_text("x")
+        _age(d / name, 86400)                    # a day old -> past the mtime guard
     f = DataFetcher(cache_dir=str(tmp_path), refresh_recent=2)
     f._refresh_recent_months("AAA.NS", "2026-08-16", "1d")
     assert not (d / "2026-08.csv").exists()      # current month re-pulled
@@ -126,15 +134,26 @@ def test_refresh_recent_months_rolls_over_year(monkeypatch, tmp_path):
     d.mkdir(parents=True)
     for name in ["2025-12.csv", "2026-01.csv"]:
         (d / name).write_text("x")
+        _age(d / name, 86400)
     f = DataFetcher(cache_dir=str(tmp_path), refresh_recent=2)
     f._refresh_recent_months("AAA.NS", "2026-01-05", "1d")
     assert not (d / "2026-01.csv").exists() and not (d / "2025-12.csv").exists()
 
 
+def test_refresh_skips_recently_written_month(monkeypatch, tmp_path):
+    # A month refreshed moments ago (rapid rebuild) must be left alone -> no extra request.
+    monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
+    d = tmp_path / "AAA.NS" / "1d"; d.mkdir(parents=True)
+    (d / "2026-08.csv").write_text("x")          # just written -> fresh
+    DataFetcher(cache_dir=str(tmp_path), refresh_recent=1)._refresh_recent_months(
+        "AAA.NS", "2026-08-16", "1d")
+    assert (d / "2026-08.csv").exists()          # kept: still within the mtime guard
+
+
 def test_refresh_recent_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr(fetcher_mod, "YFinanceDataDownloader", _FakeDownloader)
     d = tmp_path / "AAA.NS" / "1d"; d.mkdir(parents=True)
-    (d / "2026-08.csv").write_text("x")
+    (d / "2026-08.csv").write_text("x"); _age(d / "2026-08.csv", 86400)
     DataFetcher(cache_dir=str(tmp_path), refresh_recent=0)._refresh_recent_months(
         "AAA.NS", "2026-08-16", "1d")
     assert (d / "2026-08.csv").exists()          # untouched when disabled

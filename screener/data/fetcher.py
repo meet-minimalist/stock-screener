@@ -17,12 +17,15 @@ _BACKOFF_BASE = float(os.getenv("YF_FETCH_BACKOFF", "0.5"))
 _RL_RETRIES = int(os.getenv("YF_RL_RETRIES", "3"))
 _RL_BASE = float(os.getenv("YF_RL_BACKOFF", "5"))
 _RL_CAP = float(os.getenv("YF_RL_BACKOFF_CAP", "30"))
-# How many trailing months to always re-download. yf_cache never refreshes a month whose
-# file already exists, so the current (incomplete) month -- and the previous one across a
-# month boundary -- would otherwise go stale. Refreshing just these keeps prices current
-# while leaving old history cached (so a build makes ~2 requests/ticker, not a full,
-# rate-limited re-download of the whole history).
-_REFRESH_RECENT_MONTHS = int(os.getenv("YF_REFRESH_RECENT_MONTHS", "2"))
+# How many trailing months to re-download. yf_cache never refreshes a month whose file
+# already exists, so the current (incomplete) month would otherwise go stale. Refreshing
+# just the current month (daily runs keep the previous one complete) makes ~1 request per
+# ticker, not a full re-download. Guarded by mtime below so rapid rebuilds don't re-pull a
+# month that was just fetched -- which is what would otherwise pile onto Yahoo's rate limit.
+_REFRESH_RECENT_MONTHS = int(os.getenv("YF_REFRESH_RECENT_MONTHS", "1"))
+# Don't re-pull a month whose cache file was written within this window (seconds): it is
+# already fresh, so a same-hour rebuild adds no load.
+_REFRESH_MIN_AGE = float(os.getenv("YF_REFRESH_MIN_AGE", "21600"))  # 6h
 
 # Incremented by the log tap below whenever yf_cache reports a Yahoo rate limit. The
 # fetcher reads its delta to tell a throttled fetch apart from a genuinely-empty one.
@@ -84,8 +87,11 @@ class DataFetcher:
         return os.path.join(self._cache_dir, ticker.upper())
 
     def _refresh_recent_months(self, ticker: str, end_date: str, interval: str) -> None:
-        """Delete the cache files for the last ``_refresh_recent`` months so yf_cache
-        re-downloads them fresh (it never refreshes a month whose file already exists)."""
+        """Delete the cache file(s) for the last ``_refresh_recent`` months so yf_cache
+        re-downloads them fresh (it never refreshes a month whose file already exists).
+
+        A file written within ``_REFRESH_MIN_AGE`` is left alone -- it's already fresh, so
+        a rapid rebuild adds no requests and can't pile onto Yahoo's rate limit."""
         if self._refresh_recent <= 0:
             return
         try:
@@ -93,11 +99,13 @@ class DataFetcher:
         except ValueError:
             return
         base = os.path.join(self._ticker_dir(ticker), interval)
+        now = time.time()
         for _ in range(self._refresh_recent):
             p = os.path.join(base, f"{y:04d}-{m:02d}.csv")
             if os.path.exists(p):
                 try:
-                    os.remove(p)
+                    if now - os.path.getmtime(p) >= _REFRESH_MIN_AGE:
+                        os.remove(p)
                 except OSError:
                     pass
             m -= 1
