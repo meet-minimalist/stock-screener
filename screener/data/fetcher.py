@@ -17,15 +17,6 @@ _BACKOFF_BASE = float(os.getenv("YF_FETCH_BACKOFF", "0.5"))
 _RL_RETRIES = int(os.getenv("YF_RL_RETRIES", "3"))
 _RL_BASE = float(os.getenv("YF_RL_BACKOFF", "5"))
 _RL_CAP = float(os.getenv("YF_RL_BACKOFF_CAP", "30"))
-# How many trailing months to re-download. yf_cache never refreshes a month whose file
-# already exists, so the current (incomplete) month would otherwise go stale. Refreshing
-# just the current month (daily runs keep the previous one complete) makes ~1 request per
-# ticker, not a full re-download. Guarded by mtime below so rapid rebuilds don't re-pull a
-# month that was just fetched -- which is what would otherwise pile onto Yahoo's rate limit.
-_REFRESH_RECENT_MONTHS = int(os.getenv("YF_REFRESH_RECENT_MONTHS", "1"))
-# Don't re-pull a month whose cache file was written within this window (seconds): it is
-# already fresh, so a same-hour rebuild adds no load.
-_REFRESH_MIN_AGE = float(os.getenv("YF_REFRESH_MIN_AGE", "21600"))  # 6h
 
 # Incremented by the log tap below whenever yf_cache reports a Yahoo rate limit. The
 # fetcher reads its delta to tell a throttled fetch apart from a genuinely-empty one.
@@ -75,42 +66,14 @@ def _clean(df: pd.DataFrame | None) -> pd.DataFrame:
 
 class DataFetcher:
     def __init__(self, cache_dir: str = "data/yfinance_cache",
-                 retries: int | None = None, rl_retries: int | None = None,
-                 refresh_recent: int | None = None):
+                 retries: int | None = None, rl_retries: int | None = None):
         self._cache_dir = cache_dir
         self._downloader = YFinanceDataDownloader(cache_dir=cache_dir)
         self._retries = _DEFAULT_RETRIES if retries is None else retries
         self._rl_retries = _RL_RETRIES if rl_retries is None else rl_retries
-        self._refresh_recent = _REFRESH_RECENT_MONTHS if refresh_recent is None else refresh_recent
 
     def _ticker_dir(self, ticker: str) -> str:
         return os.path.join(self._cache_dir, ticker.upper())
-
-    def _refresh_recent_months(self, ticker: str, end_date: str, interval: str) -> None:
-        """Delete the cache file(s) for the last ``_refresh_recent`` months so yf_cache
-        re-downloads them fresh (it never refreshes a month whose file already exists).
-
-        A file written within ``_REFRESH_MIN_AGE`` is left alone -- it's already fresh, so
-        a rapid rebuild adds no requests and can't pile onto Yahoo's rate limit."""
-        if self._refresh_recent <= 0:
-            return
-        try:
-            y, m = (int(p) for p in str(end_date)[:7].split("-"))
-        except ValueError:
-            return
-        base = os.path.join(self._ticker_dir(ticker), interval)
-        now = time.time()
-        for _ in range(self._refresh_recent):
-            p = os.path.join(base, f"{y:04d}-{m:02d}.csv")
-            if os.path.exists(p):
-                try:
-                    if now - os.path.getmtime(p) >= _REFRESH_MIN_AGE:
-                        os.remove(p)
-                except OSError:
-                    pass
-            m -= 1
-            if m == 0:
-                y, m = y - 1, 12
 
     def _attempt(self, ticker: str, start_date: str, end_date: str,
                  interval: str) -> tuple[pd.DataFrame, bool]:
@@ -131,9 +94,6 @@ class DataFetcher:
         end_date: str,
         interval: str = "1d",
     ) -> pd.DataFrame:
-        # Always re-pull the trailing month(s) so today's bars aren't frozen in a stale
-        # cached month; old history stays cached, so this is ~2 requests, not a full one.
-        self._refresh_recent_months(ticker, end_date, interval)
         df, limited = self._attempt(ticker, start_date, end_date, interval)
         if not df.empty:
             return df
