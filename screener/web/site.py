@@ -135,7 +135,8 @@ def nav_html(current: str) -> str:
 def render_screener_body(header_html: str, rows: list[dict],
                          screen_meta: list[dict], columns: list[dict],
                          score_label: str = "Min score", currency: str = "$",
-                         gate_toggles: bool = False) -> str:
+                         gate_toggles: bool = False,
+                         timeline: list[dict] | None = None, as_of: str = "") -> str:
     """Generic interactive screener body: a header block + tabbed sortable tables.
 
     Reused by both the daily site and the fundamental screener — only the header,
@@ -151,6 +152,8 @@ def render_screener_body(header_html: str, rows: list[dict],
     </span>""" if gate_toggles else ""
     gates_const = (f"const GATES = {{max_pe: {_g.max_pe}, max_de: {_g.max_debt_equity}}};"
                    if gate_toggles else "")
+    timeline_const = (f"const TIMELINE = {_json_for_html(timeline)};\n"
+                      f"const LATEST_DATE = {_json_for_html(as_of)};" if timeline else "")
     return f"""
 <style>{STYLE}</style>
 <div class="app">
@@ -171,6 +174,7 @@ def render_screener_body(header_html: str, rows: list[dict],
   <div class="tablewrap">
     <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
   </div>
+  <div id="timelinewrap" hidden></div>
 </div>
 <script>
 const CURRENCY = {_json_for_html(currency)};
@@ -178,6 +182,7 @@ const RECORDS = {_json_for_html(rows)};
 const SCREENS = {_json_for_html(screen_meta)};
 const COLUMNS = {_json_for_html(columns)};
 {gates_const}
+{timeline_const}
 </script>
 <script>{SCRIPT}</script>
 """
@@ -259,7 +264,9 @@ def build_site_body(result: dict, rrg_data_uri: str | None) -> str:
   {conviction_methodology_html(currency)}
   {rrg_block}"""
     return render_screener_body(header, rows, screen_meta, COLUMNS, currency=currency,
-                                gate_toggles=True)
+                                gate_toggles=True,
+                                timeline=result.get("midsmall_timeline") or None,
+                                as_of=result.get("as_of", ""))
 
 
 def wrap_page(body: str, title: str = "Daily Stock Screener") -> str:

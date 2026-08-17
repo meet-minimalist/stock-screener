@@ -82,6 +82,11 @@ SCREENS: list[Screen] = [
            "Names the strategy sold earlier that are now past their cooldown and back in "
            "the top-20 — a fresh entry (at today's price; earlier entry shown for reference).",
            lambda r: _sig(r, "dual_momentum_rebuy"), sort_by="momentum", markets=("in",)),
+    # Custom-rendered (not a record filter): a date scrubber over the full trade log.
+    Screen("midsmall_timeline", "MidSmallcap Timeline",
+           "Scrub any date to see which names the strategy held then, with their buy date "
+           "and price — plus what it bought and sold around that date.",
+           lambda r: False, markets=("in",)),
     # --- Sector-driven ---
     Screen("sector_leaders", "Sector Leaders",
            "Stocks in sectors that are Leading or Improving on the RRG.",

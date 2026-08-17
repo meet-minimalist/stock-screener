@@ -75,10 +75,25 @@ class RebuyName:
 
 
 @dataclass
+class Trade:
+    """One position over its life -- for the scrubbable timeline. ``exit_date`` is None
+    while the position is still open on the last bar."""
+    ticker: str
+    entry_date: str
+    entry_price: float
+    exit_date: str | None
+    exit_price: float | None
+    reason: str | None
+    gain_pct: float            # realised on exit, else open gain to the latest bar
+    status: str                # "held" or "sold"
+
+
+@dataclass
 class PortfolioResult:
     held: list[HeldName]
     sold: list[SoldName]
     rebuys: list[RebuyName]
+    trades: list[Trade]        # full entry->exit log across the whole replay
 
 
 @dataclass
@@ -120,7 +135,7 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
     """Replay the strategy over aligned close series and report the book at the end."""
     closes = {t: s for t, s in closes.items() if s is not None and not s.dropna().empty}
     if not closes:
-        return PortfolioResult([], [], [])
+        return PortfolioResult([], [], [], [])
 
     panel = pd.DataFrame(closes).sort_index()
     sma = panel.rolling(TREND_PERIOD, min_periods=TREND_PERIOD).mean()
@@ -132,6 +147,15 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
     last_entry: dict[str, float] = {}          # most recent entry price, kept after a sale
     exits: dict[str, tuple] = {}  # ticker -> (exit_idx, entry_idx, entry, exit, reason)
     last_ranked: list[str] = []
+    trade_log: list[Trade] = []                # every completed position, in exit order
+
+    def _record_exit(sym: str, pos: _Position, exit_idx: int, exit_px: float, reason: str):
+        exits[sym] = (exit_idx, pos.entry_idx, pos.entry_price, exit_px, reason)
+        trade_log.append(Trade(
+            ticker=sym, entry_date=_date_str(dates[pos.entry_idx]),
+            entry_price=round(pos.entry_price, 2), exit_date=_date_str(dates[exit_idx]),
+            exit_price=round(exit_px, 2), reason=reason,
+            gain_pct=round((exit_px / pos.entry_price - 1.0) * 100.0, 1), status="sold"))
 
     for i in range(n):
         row = panel.iloc[i]
@@ -150,7 +174,7 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
             if trend_break or stop_hit:
                 reason = ("trend break + stop" if trend_break and stop_hit
                           else "trailing stop" if stop_hit else "trend break")
-                exits[sym] = (i, pos.entry_idx, pos.entry_price, float(px), reason)
+                _record_exit(sym, pos, i, float(px), reason)
                 del held[sym]
                 cooldown_until[sym] = i + COOLDOWN_BARS
 
@@ -174,8 +198,7 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
                     px = row[sym]
                     if pd.isna(px):
                         continue
-                    exits[sym] = (i, held[sym].entry_idx, held[sym].entry_price,
-                                  float(px), "dropped from top 40")
+                    _record_exit(sym, held[sym], i, float(px), "dropped from top 40")
                     del held[sym]
                     cooldown_until[sym] = i + COOLDOWN_BARS
 
@@ -231,6 +254,17 @@ def simulate(closes: dict[str, pd.Series]) -> PortfolioResult:
             ticker=sym, prev_entry_price=round(last_entry[sym], 2), current_price=round(cur, 2),
         ))
 
+    for sym, pos in held.items():                            # open positions -> live trades
+        cur = _last_valid(panel[sym])
+        if cur is None:
+            continue
+        trade_log.append(Trade(
+            ticker=sym, entry_date=_date_str(dates[pos.entry_idx]),
+            entry_price=round(pos.entry_price, 2), exit_date=None, exit_price=None,
+            reason=None, gain_pct=round((cur / pos.entry_price - 1.0) * 100.0, 1),
+            status="held"))
+
     held_out.sort(key=lambda h: h.gain_pct, reverse=True)
     sold_out.sort(key=lambda s: s.days_ago)
-    return PortfolioResult(held_out, sold_out, rebuys_out)
+    trade_log.sort(key=lambda t: t.entry_date)
+    return PortfolioResult(held_out, sold_out, rebuys_out, trade_log)

@@ -188,6 +188,7 @@ def run_daily(
     # entry prices + stops), which can surface names the liquidity gate dropped, so
     # those get lightweight synthesised records appended below.
     extra_records: list[StockRecord] = []
+    midsmall_timeline: list[dict] = []
     if mkt.key == "us":
         rotation_signals = assign_rotation_signals(momentum_metrics)
         for res in scored:
@@ -195,8 +196,8 @@ def run_daily(
             if sig:
                 res.signals[MOMENTUM_ROTATION_KEY] = sig
     elif mkt.key == "in" and member_closes:
-        extra_records = _attach_midsmall_portfolio(scored, member_closes, sec_map,
-                                                   momentum_metrics)
+        extra_records, midsmall_timeline = _attach_midsmall_portfolio(
+            scored, member_closes, sec_map, momentum_metrics)
 
     # Size segment (Mega/Large/Mid/Small/Micro) so thin small/micro-caps are labelled
     # rather than looking like blue chips. India ranks the fetched universe (SEBI-style).
@@ -233,6 +234,7 @@ def run_daily(
         "records": records,      # passing StockRecords + MidSmallcap portfolio names
         "ranked": ranked,
         "top": ranked[:top_n],
+        "midsmall_timeline": midsmall_timeline,   # full buy->sell log for the scrubber
     }
 
 
@@ -286,7 +288,13 @@ def _attach_midsmall_portfolio(scored: list, member_closes: dict, sec_map: dict,
         if r.price is None:
             r.price = rb.current_price
 
-    return extra
+    timeline = [
+        {"ticker": t.ticker, "entry_date": t.entry_date, "entry_price": t.entry_price,
+         "exit_date": t.exit_date, "exit_price": t.exit_price, "reason": t.reason,
+         "gain_pct": t.gain_pct, "status": t.status}
+        for t in pf.trades
+    ]
+    return extra, timeline
 
 
 def empty_fetch_rate(result: dict) -> float:

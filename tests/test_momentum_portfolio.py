@@ -91,4 +91,21 @@ def test_rebuy_opportunity_when_slot_is_full(monkeypatch):
 def test_weight_is_equal_and_empty_input_is_safe():
     assert mp.WEIGHT_PCT == round(mp.SLOT_FRAC / mp.TOP_N * 100, 1)
     empty = mp.simulate({})
-    assert (empty.held, empty.sold, empty.rebuys) == ([], [], [])
+    assert (empty.held, empty.sold, empty.rebuys, empty.trades) == ([], [], [], [])
+
+
+def test_trade_log_records_closed_and_open_positions():
+    n = 300
+    prices = _rising(210, 0.004)                 # rise (entered), then a stop-out crash
+    prices += [prices[-1] * (1 - 0.05) ** k for k in range(1, 11)]
+    prices += [prices[-1]] * (n - len(prices))
+    res = mp.simulate({"OLD": _series(prices), "WIN": _series(_rising(n, 0.004))})
+
+    # OLD was bought then sold -> a closed trade with entry/exit dates and a reason.
+    old = [t for t in res.trades if t.ticker == "OLD" and t.status == "sold"]
+    assert old and old[0].exit_date and old[0].exit_date > old[0].entry_date and old[0].reason
+    # WIN is still held at the end -> an open trade (no exit).
+    win_open = [t for t in res.trades if t.ticker == "WIN" and t.status == "held"]
+    assert win_open and win_open[0].exit_date is None and win_open[0].exit_price is None
+    # The log is sorted by entry date.
+    assert [t.entry_date for t in res.trades] == sorted(t.entry_date for t in res.trades)

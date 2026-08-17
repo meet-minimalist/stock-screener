@@ -88,7 +88,24 @@ td.num { font-variant-numeric:tabular-nums; }
   border:1px solid var(--line); color:var(--ink2); background:var(--line2); }
 .tag.t-mega, .tag.t-large { color:var(--accent); border-color:var(--chip-line); background:var(--chip-bg); }
 .tag.t-mid { color:#b07400; border-color:rgba(176,116,0,.35); background:rgba(176,116,0,.12); }
+.tag.t-open { color:#fff; border-color:transparent; background:#2a78d6; }
 tbody tr:hover { background:var(--line2); }
+/* MidSmallcap Timeline scrubber */
+.tlbar { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:16px; }
+.tlbar label { font-size:.82rem; color:var(--muted); display:inline-flex; gap:6px; align-items:center; }
+.tlbar input[type="range"] { flex:1; min-width:200px; accent-color:var(--accent); }
+.tlbar input[type="date"] { background:var(--card); color:var(--ink); border:1px solid var(--line);
+  border-radius:8px; padding:6px 8px; font-family:inherit; font-size:.82rem; }
+.tlbar .tlnow { font-size:.85rem; color:var(--ink2); font-variant-numeric:tabular-nums; }
+.tlgrid { display:grid; grid-template-columns:2fr 1fr; gap:22px; align-items:start; }
+@media (max-width:820px){ .tlgrid { grid-template-columns:1fr; } }
+.tlcol h4 { margin:2px 0 8px; font-size:.85rem; letter-spacing:.02em; }
+.tltab { width:100%; border-collapse:collapse; font-size:.84rem; font-variant-numeric:tabular-nums; }
+.tltab th, .tltab td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; }
+.tltab th.left, .tltab td.left { text-align:left; }
+.tltab th { position:sticky; top:0; background:var(--card); color:var(--muted); font-weight:600; }
+.tlist { list-style:none; margin:0 0 16px; padding:0; font-size:.84rem; }
+.tlist li { padding:5px 0; border-bottom:1px solid var(--line2); }
 .rank { color:var(--muted); }
 .tk { font-weight:650; }
 .score { display:inline-block; min-width:34px; text-align:center; color:#fff; border-radius:7px;
@@ -109,8 +126,13 @@ tbody tr:hover { background:var(--line2); }
 SCRIPT = r"""
 (function () {
   var state = { tab: SCREENS[0].key, q: "", sector: "", minScore: 0, sortKey: null, sortDir: -1,
-                hidePe: true, hideDe: true, hideNeg: true };
+                hidePe: true, hideDe: true, hideNeg: true, asOf: null };
   var HAS_GATES = (typeof GATES !== "undefined");
+  var HAS_TIMELINE = (typeof TIMELINE !== "undefined");
+  var TIMELINE_KEY = "midsmall_timeline";
+  var DAY = 86400000;
+  function dms(s) { return Date.parse(s + "T00:00:00Z"); }         // ISO date -> ms (UTC)
+  function iso(ms) { return new Date(ms).toISOString().slice(0, 10); }
   var FCOLORS = { sector:"#2a78d6", trend:"#1baf7a", rel_strength:"#eda100",
                   volatility:"#4a3aa7", trigger:"#eb6834", fundamental:"#e34948" };
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -162,6 +184,7 @@ SCRIPT = r"""
   }
 
   function screenCount(key) {
+    if (HAS_TIMELINE && key === TIMELINE_KEY) return tlHeldOn(tlBounds().max).length;
     var n = 0;
     for (var i=0;i<RECORDS.length;i++){ var r=RECORDS[i];
       if (r.screens.indexOf(key) >= 0 && passesGates(r)) n++; }
@@ -206,13 +229,93 @@ SCRIPT = r"""
     });
   }
 
+  // ---- MidSmallcap Timeline: a date scrubber over the full buy->sell trade log ----
+  function tlBounds() {
+    var min = Infinity, max = dms(LATEST_DATE);
+    TIMELINE.forEach(function (t) {
+      var e = dms(t.entry_date); if (e < min) min = e;
+      if (t.exit_date) { var x = dms(t.exit_date); if (x > max) max = x; }
+    });
+    if (!isFinite(min)) min = max;
+    return { min: min, max: max };
+  }
+  function tlHeldOn(d) {          // positions open on day d (bought on/before, not yet exited)
+    return TIMELINE.filter(function (t) {
+      var e = dms(t.entry_date), x = t.exit_date ? dms(t.exit_date) : Infinity;
+      return e <= d && x > d;
+    });
+  }
+  function tlMoney(v) { return fmt({ type: "money" }, v); }
+  function tlRet(v) { return fmt({ type: "ret" }, v); }
+
+  function renderTimeline() {
+    var wrap = $("#timelinewrap");
+    var b = tlBounds();
+    var d = state.asOf == null ? b.max : Math.max(b.min, Math.min(b.max, state.asOf));
+    var q = state.q.toLowerCase();
+    var match = function (t) { return !q || t.ticker.toLowerCase().indexOf(q) >= 0; };
+    var held = tlHeldOn(d).filter(match).sort(function (a, z) { return dms(a.entry_date) - dms(z.entry_date); });
+    var WIN = 7 * DAY;
+    var sold = TIMELINE.filter(function (t) { return t.exit_date && match(t) && dms(t.exit_date) <= d && d - dms(t.exit_date) <= WIN; })
+                       .sort(function (a, z) { return dms(z.exit_date) - dms(a.exit_date); });
+    var bought = TIMELINE.filter(function (t) { return match(t) && dms(t.entry_date) <= d && d - dms(t.entry_date) <= WIN; })
+                         .sort(function (a, z) { return dms(z.entry_date) - dms(a.entry_date); });
+    var maxOff = Math.round((b.max - b.min) / DAY), off = Math.round((d - b.min) / DAY);
+
+    var h = '<div class="tlbar">' +
+      '<label>As of <input type="date" id="tlDate" value="' + iso(d) + '" min="' + iso(b.min) + '" max="' + iso(b.max) + '"></label>' +
+      '<input type="range" id="tlRange" min="0" max="' + maxOff + '" value="' + off + '" step="1">' +
+      '<span class="tlnow">' + iso(d) + ' · <b>' + held.length + '</b> held</span></div>';
+
+    h += '<div class="tlgrid">';
+    // Held-on-date table
+    h += '<div class="tlcol"><h4>Held on ' + iso(d) + ' (' + held.length + ')</h4>';
+    if (!held.length) h += '<p class="muted">Nothing held on this date' + (q ? ' matching “' + q + '”.' : '.') + '</p>';
+    else {
+      h += '<table class="tltab"><thead><tr><th class="num">#</th><th class="left">Ticker</th>' +
+        '<th class="num">Bought</th><th class="num">Buy px</th><th class="num">Held</th><th class="left">Eventual result</th></tr></thead><tbody>';
+      held.forEach(function (t, i) {
+        var days = Math.max(0, Math.round((d - dms(t.entry_date)) / DAY));
+        var res = t.status === "held"
+          ? '<span class="tag t-open">still held</span> ' + tlRet(t.gain_pct)
+          : 'sold ' + tlRet(t.gain_pct) + ' <span class="muted">' + (t.reason || "") + " · " + t.exit_date + '</span>';
+        h += '<tr><td class="num rank">' + (i + 1) + '</td><td class="left tk">' + t.ticker + '</td>' +
+          '<td class="num">' + t.entry_date + '</td><td class="num">' + tlMoney(t.entry_price) + '</td>' +
+          '<td class="num">' + days + 'd</td><td class="left">' + res + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '</div>';
+    // Transactions around the date
+    h += '<div class="tlcol"><h4>Bought in the 7 days to ' + iso(d) + ' (' + bought.length + ')</h4>';
+    h += bought.length ? '<ul class="tlist">' + bought.map(function (t) {
+      return '<li><b>' + t.ticker + '</b> <span class="muted">' + t.entry_date + '</span> at ' + tlMoney(t.entry_price) + '</li>'; }).join("") + '</ul>'
+      : '<p class="muted">No buys in this window.</p>';
+    h += '<h4>Sold in the 7 days to ' + iso(d) + ' (' + sold.length + ')</h4>';
+    h += sold.length ? '<ul class="tlist">' + sold.map(function (t) {
+      return '<li><b>' + t.ticker + '</b> ' + tlRet(t.gain_pct) + ' <span class="muted">' + (t.reason || "") + " · " + t.exit_date + '</span></li>'; }).join("") + '</ul>'
+      : '<p class="muted">No sells in this window.</p>';
+    h += '</div></div>';
+
+    wrap.innerHTML = h;
+    $("#tlRange").addEventListener("input", function (e) { state.asOf = b.min + (+e.target.value) * DAY; renderTimeline(); });
+    $("#tlDate").addEventListener("change", function (e) { var v = dms(e.target.value); if (!isNaN(v)) { state.asOf = v; renderTimeline(); } });
+  }
+
   function render() {
     var sc = screenByKey(state.tab);
+    var isTimeline = HAS_TIMELINE && state.tab === TIMELINE_KEY;
     $("#tabdesc").textContent = sc.description;
     document.querySelectorAll(".tab").forEach(function (t) {
       t.setAttribute("aria-selected", t.dataset.key === state.tab ? "true" : "false");
       var n = t.querySelector(".n"); if (n) n.textContent = screenCount(t.dataset.key);
     });
+
+    // Timeline tab: swap the standard table for the date scrubber.
+    $("#timelinewrap").hidden = !isTimeline;
+    var tw = document.querySelector(".tablewrap"); if (tw) tw.hidden = isTimeline;
+    if (isTimeline) { $("#count").textContent = ""; renderTimeline(); return; }
+
     var rows = currentRows();
     $("#count").textContent = rows.length + " stocks";
     var cols = visibleColumns(rows, sc);
